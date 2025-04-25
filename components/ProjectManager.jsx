@@ -2,6 +2,82 @@ import { useEffect, useState } from 'react'
 import { useOpenAI } from '../useOpenAI'
 import { supabase } from '../supabaseClient'
 
+// Add Tooltip component at the top level
+const Tooltip = ({ children, text }) => {
+  return (
+    <div className="relative group">
+      {children}
+      <div className="absolute bottom-full left-1/2 transform -translate-x-1/2 mb-2 px-3 py-1 bg-gray-900 text-white text-sm rounded-lg opacity-0 group-hover:opacity-100 transition-opacity duration-200 whitespace-nowrap pointer-events-none">
+        {text}
+        <div className="absolute top-full left-1/2 transform -translate-x-1/2 -mt-1 border-4 border-transparent border-t-gray-900"></div>
+      </div>
+    </div>
+  )
+}
+
+// Enhanced loading spinner with pulse effect
+const LoadingSpinner = () => (
+  <div className="flex items-center space-x-2">
+    <div className="w-2 h-2 bg-white rounded-full animate-pulse"></div>
+    <div className="w-2 h-2 bg-white rounded-full animate-pulse delay-75"></div>
+    <div className="w-2 h-2 bg-white rounded-full animate-pulse delay-150"></div>
+  </div>
+)
+
+// Add ChatMessage component for better message display
+const ChatMessage = ({ message, onRegenerate }) => {
+  const isAI = message.role === 'assistant'
+  return (
+    <div className={`p-4 rounded-lg mb-4 ${isAI ? 'bg-purple-50 border border-purple-100' : 'bg-blue-50 border border-blue-100'}`}>
+      <div className="flex items-start justify-between">
+        <div className="flex items-center mb-2">
+          <span className={`text-sm font-medium ${isAI ? 'text-purple-700' : 'text-blue-700'}`}>
+            {isAI ? 'AI Assistant' : 'You'}
+          </span>
+        </div>
+        {isAI && onRegenerate && (
+          <Tooltip text="Regenerate response">
+            <button
+              onClick={onRegenerate}
+              className="text-purple-600 hover:text-purple-700 p-1 rounded-full hover:bg-purple-100 transition-colors duration-200"
+            >
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+              </svg>
+            </button>
+          </Tooltip>
+        )}
+      </div>
+      <p className="text-gray-800 whitespace-pre-wrap">{message.content}</p>
+    </div>
+  )
+}
+
+// Add Modal component
+const Modal = ({ isOpen, onClose, children }) => {
+  if (!isOpen) return null;
+  
+  return (
+    <div className="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center">
+      <div className="bg-white rounded-lg w-[80%] max-w-4xl max-h-[80vh] flex flex-col">
+        <div className="flex justify-end p-4">
+          <button
+            onClick={onClose}
+            className="text-gray-500 hover:text-gray-700"
+          >
+            <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
+        </div>
+        <div className="flex-1 overflow-y-auto px-6 pb-6">
+          {children}
+        </div>
+      </div>
+    </div>
+  );
+};
+
 export default function ProjectManager({ user }) {
   console.log('[ProjectManager] Component mounted with user:', user)
 
@@ -13,11 +89,20 @@ export default function ProjectManager({ user }) {
   const [activeProjectId, setActiveProjectId] = useState(null)
   const [activeSectionId, setActiveSectionId] = useState(null)
   const [editorText, setEditorText] = useState("")
-  const [loadingStates, setLoadingStates] = useState({})
+  const [loadingStates, setLoadingStates] = useState({
+    create: false,
+    addSection: false
+  })
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState(null)
+  const [validationErrors, setValidationErrors] = useState({
+    projectName: '',
+    sectionName: ''
+  })
+  const [isAIModalOpen, setIsAIModalOpen] = useState(false);
+  const [projectAIHistory, setProjectAIHistory] = useState([]);
 
-  const { ask, response, loading } = useOpenAI()
+  const { ask, response, loading, history, regenerate } = useOpenAI()
 
   useEffect(() => {
     console.log('[ProjectManager] useEffect triggered with user:', user?.id)
@@ -74,27 +159,14 @@ export default function ProjectManager({ user }) {
     user: user?.id 
   })
 
-  if (error) {
-    return (
-      <div className="flex h-screen items-center justify-center">
-        <div className="text-red-600">Error loading projects: {error}</div>
-      </div>
-    )
-  }
-
-  if (isLoading) {
-    console.log('[ProjectManager] Rendering loading spinner')
-    return (
-      <div className="flex h-screen items-center justify-center">
-        <div className="w-8 h-8 border-4 border-blue-600 border-t-transparent rounded-full animate-spin"></div>
-      </div>
-    )
-  }
-
-  console.log('[ProjectManager] Rendering main component')
-
   const handleCreateProject = async () => {
-    if (!projectName.trim()) return
+    // Reset validation error
+    setValidationErrors(prev => ({ ...prev, projectName: '' }))
+
+    if (!projectName.trim()) {
+      setValidationErrors(prev => ({ ...prev, projectName: 'Project name is required' }))
+      return
+    }
 
     setLoadingStates(prev => ({ ...prev, create: true }))
     try {
@@ -111,6 +183,7 @@ export default function ProjectManager({ user }) {
 
       if (error) {
         console.error('Error creating project:', error)
+        setValidationErrors(prev => ({ ...prev, projectName: error.message }))
         return
       }
 
@@ -171,17 +244,34 @@ export default function ProjectManager({ user }) {
     }
   }
 
-  const handleAddSection = () => {
-    if (!sectionName.trim() || !activeProjectId) return
-    const newSection = { id: Date.now(), name: sectionName, content: "" }
-    setProjects((prev) =>
-      prev.map((p) =>
-        p.id === activeProjectId
-          ? { ...p, sections: [...(p.sections || []), newSection] }
-          : p
+  const handleAddSection = async () => {
+    // Reset validation error
+    setValidationErrors(prev => ({ ...prev, sectionName: '' }))
+
+    if (!sectionName.trim()) {
+      setValidationErrors(prev => ({ ...prev, sectionName: 'Section name is required' }))
+      return
+    }
+
+    if (!activeProjectId) {
+      setValidationErrors(prev => ({ ...prev, sectionName: 'Please select a project first' }))
+      return
+    }
+    
+    setLoadingStates(prev => ({ ...prev, addSection: true }))
+    try {
+      const newSection = { id: Date.now(), name: sectionName, content: "" }
+      setProjects((prev) =>
+        prev.map((p) =>
+          p.id === activeProjectId
+            ? { ...p, sections: [...(p.sections || []), newSection] }
+            : p
+        )
       )
-    )
-    setSectionName("")
+      setSectionName("")
+    } finally {
+      setLoadingStates(prev => ({ ...prev, addSection: false }))
+    }
   }
 
   const handleSaveContent = async () => {
@@ -229,206 +319,453 @@ export default function ProjectManager({ user }) {
     URL.revokeObjectURL(url)
   }
 
+  // Function to get all sections content
+  const getAllSectionsContent = () => {
+    const activeProject = projects.find(p => p.id === activeProjectId);
+    if (!activeProject?.sections) return '';
+    
+    return activeProject.sections.map(section => (
+      `Chapter: ${section.name}\n\n${section.content || ''}\n\n---\n\n`
+    )).join('');
+  };
+
+  // Function to ask AI about the entire project
+  const askProjectAI = async (question) => {
+    const allContent = getAllSectionsContent();
+    const context = `This is a project named "${projects.find(p => p.id === activeProjectId)?.name}". Here are all its sections:\n\n${allContent}\n\nQuestion: ${question}`;
+    
+    try {
+      const response = await ask(context, { displayMessage: question });
+      setProjectAIHistory(prev => [...prev, 
+        { role: 'user', content: question },
+        { role: 'assistant', content: response }
+      ]);
+    } catch (error) {
+      console.error('Error asking project AI:', error);
+    }
+  };
+
   const activeProject = projects.find((p) => p.id === activeProjectId)
   const activeSection = activeProject?.sections.find((s) => s.id === activeSectionId)
 
-  return (
-    <div className="flex h-screen overflow-hidden">
-      {/* Sidebar */}
-      <div className="w-64 bg-gray-100 border-r p-4 overflow-y-auto">
-        <h3 className="text-lg font-bold mb-4">Sections</h3>
-        {activeProject?.sections.map((section) => (
-          <div
-            key={section.id}
-            onClick={() => handleSelectSection(section)}
-            className={`p-2 rounded cursor-pointer mb-1 ${
-              section.id === activeSectionId
-                ? 'bg-blue-500 text-white'
-                : 'hover:bg-gray-200'
-            }`}
-          >
-            {section.name}
-          </div>
-        ))}
-      </div>
-
-      {/* Main Content */}
-      <div className="flex-1 p-6 overflow-y-auto">
-        {!activeSection && (
-          <>
-            <div className="mb-6">
-              <h2 className="text-xl font-semibold mb-2">Create New Project</h2>
-              <input
-                type="text"
-                placeholder="Project name"
-                value={projectName}
-                onChange={(e) => setProjectName(e.target.value)}
-                className="border rounded p-2 w-full"
-              />
-              <button
-                onClick={handleCreateProject}
-                disabled={loadingStates.create}
-                className="mt-2 px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50"
-              >
-                {loadingStates.create ? 'Adding...' : 'Add Project'}
-              </button>
-            </div>
-
-            <div className="space-y-3">
-              <h3 className="font-medium">Projects:</h3>
-              <div className="space-y-2">
-                {projects.map((p) => (
-                  <div
-                    key={p.id}
-                    className={`border rounded p-2 ${
-                      p.id === activeProjectId ? 'bg-blue-50' : ''
-                    } hover:bg-gray-50`}
-                  >
-                    <div className="flex justify-between items-center">
-                      <div className="flex items-center gap-2">
-                        <div className="cursor-move text-gray-400 hover:text-gray-600 px-1">
-                          ⋮⋮
-                        </div>
-                        {editingProjectName === p.id ? (
-                          <input
-                            type="text"
-                            value={p.name}
-                            onChange={(e) => {
-                              setProjects(projects.map(proj =>
-                                proj.id === p.id ? { ...proj, name: e.target.value } : proj
-                              ))
-                            }}
-                            onBlur={() => {
-                              handleRenameProject(p.id, p.name)
-                              setEditingProjectName(null)
-                            }}
-                            onKeyDown={(e) => {
-                              if (e.key === 'Enter') {
-                                handleRenameProject(p.id, p.name)
-                                setEditingProjectName(null)
-                              }
-                            }}
-                            className="border rounded p-1 flex-1"
-                            autoFocus
-                          />
-                        ) : (
-                          <div
-                            className="font-semibold cursor-pointer"
-                            onDoubleClick={() => setEditingProjectName(p.id)}
-                            onClick={() => {
-                              setActiveProjectId(p.id)
-                              setActiveSectionId(null)
-                              setEditorText("")
-                            }}
-                          >
-                            {p.name}
-                          </div>
-                        )}
-                      </div>
-                      <div className="flex gap-2 text-sm items-center">
-                        {loadingStates[p.id] && (
-                          <div className="w-4 h-4 border-2 border-blue-600 border-t-transparent rounded-full animate-spin" />
-                        )}
-                        <button
-                          onClick={() => setEditingProjectName(p.id)}
-                          className="text-yellow-600 hover:text-yellow-700"
-                        >
-                          Edit
-                        </button>
-                        <button
-                          onClick={() => handleDeleteProject(p.id)}
-                          className="text-red-600 hover:text-red-700"
-                        >
-                          Delete
-                        </button>
-                      </div>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-
-            {activeProject && (
-              <div className="mt-6 space-y-4">
-                <h3 className="text-lg font-medium">Add Section</h3>
-                <input
-                  type="text"
-                  placeholder="Section name"
-                  value={sectionName}
-                  onChange={(e) => setSectionName(e.target.value)}
-                  className="border rounded p-2 w-full"
-                />
-                <button
-                  onClick={handleAddSection}
-                  className="px-4 py-2 bg-green-600 text-white rounded hover:bg-green-700"
-                >
-                  Add Section
-                </button>
-              </div>
+  // Add a new function to render the project list view
+  const renderProjectList = () => (
+    <div className="max-w-4xl mx-auto p-6">
+      <div className="mb-8">
+        <h2 className="text-2xl font-bold mb-4">My Projects</h2>
+        <div className="mb-6">
+          <h3 className="text-lg font-semibold mb-2">Create New Project</h3>
+          <div className="space-y-2">
+            <input
+              type="text"
+              placeholder="Project name"
+              value={projectName}
+              onChange={(e) => {
+                setProjectName(e.target.value)
+                if (validationErrors.projectName) {
+                  setValidationErrors(prev => ({ ...prev, projectName: '' }))
+                }
+              }}
+              className={`border rounded p-2 w-full ${
+                validationErrors.projectName ? 'border-red-500 focus:ring-red-500' : 'focus:ring-blue-500'
+              }`}
+            />
+            {validationErrors.projectName && (
+              <p className="text-red-500 text-sm">{validationErrors.projectName}</p>
             )}
-          </>
-        )}
-
-        {activeSection && (
-          <>
             <button
-              onClick={() => setActiveSectionId(null)}
-              className="mb-4 px-3 py-2 bg-gray-200 text-sm text-gray-800 rounded hover:bg-gray-300"
+              onClick={handleCreateProject}
+              disabled={loadingStates.create}
+              className="mt-2 px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50 flex items-center justify-center"
             >
-              ← Back to Projects
-            </button>
-
-            <div className="space-y-4">
-              <h3 className="text-lg font-medium">Editing: {activeSection.name}</h3>
-              <textarea
-                className="w-full h-40 border rounded p-2"
-                placeholder="Write your content here..."
-                value={editorText}
-                onChange={(e) => setEditorText(e.target.value)}
-              />
-              <div className="space-x-2">
-                <button
-                  onClick={handleSaveContent}
-                  className="px-4 py-2 bg-indigo-600 text-white rounded hover:bg-indigo-700"
-                >
-                  Save Section
-                </button>
-                <button
-                  onClick={() => ask(editorText)}
-                  className="px-4 py-2 bg-purple-600 text-white rounded hover:bg-purple-700"
-                >
-                  Ask AI for Help
-                </button>
-                <button
-                  onClick={() =>
-                    exportSection(activeSection.name, editorText, 'txt')
-                  }
-                  className="px-4 py-2 bg-gray-700 text-white rounded hover:bg-gray-800"
-                >
-                  Export as .txt
-                </button>
-                <button
-                  onClick={() =>
-                    exportSection(activeSection.name, editorText, 'md')
-                  }
-                  className="px-4 py-2 bg-gray-900 text-white rounded hover:bg-black"
-                >
-                  Export as .md
-                </button>
-              </div>
-
-              {loading && <p className="text-gray-500">Thinking...</p>}
-
-              {response && (
-                <div className="p-4 mt-4 border rounded bg-gray-50">
-                  <h4 className="font-medium mb-2">AI Suggestion:</h4>
-                  <p>{response}</p>
-                </div>
+              {loadingStates.create ? (
+                <>
+                  Adding... <LoadingSpinner />
+                </>
+              ) : (
+                'Add Project'
               )}
-            </div>
-          </>
-        )}
+            </button>
+          </div>
+        </div>
+
+        <div className="space-y-3">
+          <h3 className="text-lg font-semibold">Projects:</h3>
+          <div className="grid gap-4">
+            {projects.map((p) => (
+              <div
+                key={p.id}
+                className={`border rounded-lg p-4 ${
+                  p.id === activeProjectId ? 'border-blue-500 bg-blue-50' : 'hover:border-gray-400'
+                } transition-all duration-200`}
+              >
+                <div className="flex justify-between items-center">
+                  <div className="flex-1">
+                    {editingProjectName === p.id ? (
+                      <input
+                        type="text"
+                        value={p.name}
+                        onChange={(e) => {
+                          setProjects(projects.map(proj =>
+                            proj.id === p.id ? { ...proj, name: e.target.value } : proj
+                          ))
+                        }}
+                        onBlur={() => {
+                          handleRenameProject(p.id, p.name)
+                          setEditingProjectName(null)
+                        }}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') {
+                            handleRenameProject(p.id, p.name)
+                            setEditingProjectName(null)
+                          }
+                        }}
+                        className="border rounded p-2 w-full"
+                        autoFocus
+                      />
+                    ) : (
+                      <div className="flex items-center justify-between">
+                        <h4 className="text-xl font-semibold">{p.name}</h4>
+                        <span className="text-sm text-gray-500">
+                          {p.sections?.length || 0} sections
+                        </span>
+                      </div>
+                    )}
+                  </div>
+                </div>
+                <div className="mt-4 flex justify-between items-center">
+                  <button
+                    onClick={() => {
+                      setActiveProjectId(p.id)
+                      setActiveSectionId(null)
+                      setEditorText("")
+                    }}
+                    className="px-4 py-2 bg-blue-100 text-blue-700 rounded hover:bg-blue-200 transition-colors duration-200"
+                  >
+                    Open Project
+                  </button>
+                  <div className="flex gap-2">
+                    <Tooltip text="Rename this project">
+                      <button
+                        onClick={() => setEditingProjectName(p.id)}
+                        className="text-yellow-600 hover:text-yellow-700 p-2 rounded transition-colors duration-200"
+                      >
+                        <span className="sr-only">Edit</span>
+                        Edit
+                      </button>
+                    </Tooltip>
+                    <Tooltip text="Delete this project and all its sections">
+                      <button
+                        onClick={() => handleDeleteProject(p.id)}
+                        className="text-red-600 hover:text-red-700 p-2 rounded transition-colors duration-200"
+                      >
+                        <span className="sr-only">Delete</span>
+                        Delete
+                      </button>
+                    </Tooltip>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
       </div>
     </div>
   )
+
+  // Add a new function to render the project detail view
+  const renderProjectDetail = () => {
+    const activeProject = projects.find(p => p.id === activeProjectId)
+    if (!activeProject) return null
+
+    return (
+      <div className="h-screen flex flex-col">
+        {/* Project Header */}
+        <div className="bg-white border-b px-6 py-4">
+          <div className="flex items-center justify-between max-w-6xl mx-auto">
+            <div className="flex items-center gap-4">
+              <button
+                onClick={() => {
+                  setActiveProjectId(null)
+                  setActiveSectionId(null)
+                }}
+                className="text-gray-600 hover:text-gray-900"
+              >
+                ← Back to Projects
+              </button>
+              <h1 className="text-2xl font-bold">{activeProject.name}</h1>
+            </div>
+            <button
+              onClick={() => setIsAIModalOpen(true)}
+              className="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors duration-200 flex items-center gap-2"
+            >
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 10V3L4 14h7v7l9-11h-7z" />
+              </svg>
+              Project AI Assistant
+            </button>
+          </div>
+        </div>
+
+        {/* AI Assistant Modal */}
+        <Modal isOpen={isAIModalOpen} onClose={() => setIsAIModalOpen(false)}>
+          <div className="space-y-4">
+            <h2 className="text-2xl font-bold mb-4">Project AI Assistant</h2>
+            <p className="text-gray-600 mb-4">
+              Ask questions about any part of your project. The AI has access to all sections.
+            </p>
+            
+            {/* AI Input */}
+            <div className="flex gap-2 mb-6">
+              <input
+                type="text"
+                placeholder="Ask about any chapter or section..."
+                className="flex-1 border rounded-lg px-4 py-2"
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && !e.shiftKey) {
+                    e.preventDefault();
+                    const question = e.target.value.trim();
+                    if (question) {
+                      askProjectAI(question);
+                      e.target.value = '';
+                    }
+                  }
+                }}
+              />
+              <button
+                onClick={() => {
+                  const input = document.querySelector('input[placeholder="Ask about any chapter or section..."]');
+                  const question = input.value.trim();
+                  if (question) {
+                    askProjectAI(question);
+                    input.value = '';
+                  }
+                }}
+                disabled={loading}
+                className={`px-4 py-2 bg-purple-600 text-white rounded hover:bg-purple-700 transition-colors duration-200 flex items-center space-x-2 ${loading ? 'opacity-75 cursor-not-allowed' : ''}`}
+              >
+                {loading ? (
+                  <>
+                    <span>Thinking</span>
+                    <LoadingSpinner />
+                  </>
+                ) : (
+                  'Ask AI'
+                )}
+              </button>
+            </div>
+
+            {/* Chat History */}
+            <div className="space-y-4">
+              {projectAIHistory.map((message, index) => (
+                <ChatMessage
+                  key={index}
+                  message={message}
+                  onRegenerate={message.role === 'assistant' ? () => askProjectAI(projectAIHistory[index - 1].content) : undefined}
+                />
+              ))}
+            </div>
+          </div>
+        </Modal>
+
+        {/* Main Content */}
+        <div className="flex-1 flex overflow-hidden">
+          {/* Sections Sidebar */}
+          <div className="w-64 border-r bg-gray-50 flex flex-col">
+            <div className="p-4 border-b bg-white">
+              <h2 className="text-lg font-semibold mb-2">Sections</h2>
+              <div className="space-y-2">
+                <input
+                  type="text"
+                  placeholder="New section name"
+                  value={sectionName}
+                  onChange={(e) => {
+                    setSectionName(e.target.value)
+                    if (validationErrors.sectionName) {
+                      setValidationErrors(prev => ({ ...prev, sectionName: '' }))
+                    }
+                  }}
+                  className={`border rounded p-2 w-full ${
+                    validationErrors.sectionName ? 'border-red-500 focus:ring-red-500' : 'focus:ring-blue-500'
+                  }`}
+                />
+                {validationErrors.sectionName && (
+                  <p className="text-red-500 text-sm">{validationErrors.sectionName}</p>
+                )}
+                <button
+                  onClick={handleAddSection}
+                  disabled={loadingStates.addSection}
+                  className="w-full px-4 py-2 bg-green-600 text-white rounded hover:bg-green-700 disabled:opacity-50 flex items-center justify-center"
+                >
+                  {loadingStates.addSection ? (
+                    <>
+                      Adding... <LoadingSpinner />
+                    </>
+                  ) : (
+                    'Add Section'
+                  )}
+                </button>
+              </div>
+            </div>
+            <div className="flex-1 overflow-y-auto p-2">
+              {activeProject.sections?.map((section) => (
+                <div
+                  key={section.id}
+                  onClick={() => handleSelectSection(section)}
+                  className={`p-3 rounded-lg mb-2 cursor-pointer transition-all duration-200 ${
+                    section.id === activeSectionId
+                      ? 'bg-blue-500 text-white'
+                      : 'hover:bg-gray-200'
+                  }`}
+                >
+                  <div className="flex items-center justify-between">
+                    <span className="font-medium">{section.name}</span>
+                    <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                      <Tooltip text="Rename section">
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            setEditingSectionName(section.id)
+                          }}
+                          className="p-1 text-gray-600 hover:text-gray-900 rounded"
+                        >
+                          <span className="sr-only">Edit</span>
+                          Edit
+                        </button>
+                      </Tooltip>
+                      <Tooltip text="Delete section">
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            const confirmDelete = window.confirm("Delete this section?")
+                            if (confirmDelete) {
+                              setProjects(projects.map(p =>
+                                p.id === activeProjectId
+                                  ? {
+                                      ...p,
+                                      sections: p.sections.filter(s => s.id !== section.id)
+                                    }
+                                  : p
+                              ))
+                            }
+                          }}
+                          className="p-1 text-gray-600 hover:text-gray-900 rounded"
+                        >
+                          <span className="sr-only">Delete</span>
+                          Delete
+                        </button>
+                      </Tooltip>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Content Area */}
+          <div className="flex-1 overflow-y-auto p-6">
+            {activeSection ? (
+              <div className="max-w-3xl mx-auto space-y-4">
+                <div className="flex items-center justify-between">
+                  <h2 className="text-xl font-semibold">
+                    Editing: {activeSection.name}
+                  </h2>
+                  <button
+                    onClick={handleSaveContent}
+                    className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 transition-colors duration-200"
+                  >
+                    Save Changes
+                  </button>
+                </div>
+                <textarea
+                  className="w-full h-[calc(100vh-650px)] border rounded-lg p-4 font-mono"
+                  value={editorText}
+                  onChange={(e) => setEditorText(e.target.value)}
+                  placeholder="Write your content here..."
+                />
+
+                {/* AI Assistant Section */}
+                <div className="border-t pt-4 mt-4">
+                  <h3 className="text-lg font-semibold mb-3">AI Assistant</h3>
+                  <div className="flex gap-2 mb-4">
+                    <input
+                      type="text"
+                      placeholder="Ask AI about your content..."
+                      className="flex-1 border rounded-lg px-4 py-2"
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' && !e.shiftKey) {
+                          e.preventDefault();
+                          const userQuestion = e.target.value;
+                          // Send full context to AI but only display the question
+                          ask(`Regarding this content:\n\n${editorText}\n\nQuestion: ${userQuestion}`, {
+                            displayMessage: userQuestion
+                          });
+                          e.target.value = '';
+                        }
+                      }}
+                    />
+                    <button
+                      onClick={() => {
+                        const input = document.querySelector('input[placeholder="Ask AI about your content..."]');
+                        const userQuestion = input.value.trim();
+                        if (userQuestion) {
+                          // Send full context to AI but only display the question
+                          ask(`Regarding this content:\n\n${editorText}\n\nQuestion: ${userQuestion}`, {
+                            displayMessage: userQuestion
+                          });
+                          input.value = '';
+                        }
+                      }}
+                      disabled={loading}
+                      className={`px-4 py-2 bg-purple-600 text-white rounded hover:bg-purple-700 transition-colors duration-200 flex items-center space-x-2 ${loading ? 'opacity-75 cursor-not-allowed' : ''}`}
+                    >
+                      {loading ? (
+                        <>
+                          <span>Thinking</span>
+                          <LoadingSpinner />
+                        </>
+                      ) : (
+                        'Ask AI'
+                      )}
+                    </button>
+                  </div>
+                  <div className="space-y-4 max-h-[300px] overflow-y-auto">
+                    {history.map((message, index) => (
+                      <ChatMessage
+                        key={index}
+                        message={message}
+                        onRegenerate={message.role === 'assistant' ? regenerate : undefined}
+                      />
+                    ))}
+                  </div>
+                </div>
+              </div>
+            ) : (
+              <div className="flex items-center justify-center h-full text-gray-500">
+                Select a section to start editing
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+    )
+  }
+
+  if (error) {
+    return (
+      <div className="flex h-screen items-center justify-center">
+        <div className="text-red-600">Error loading projects: {error}</div>
+      </div>
+    )
+  }
+
+  if (isLoading) {
+    return (
+      <div className="flex h-screen items-center justify-center">
+        <div className="w-8 h-8 border-4 border-blue-600 border-t-transparent rounded-full animate-spin"></div>
+      </div>
+    )
+  }
+
+  return activeProjectId ? renderProjectDetail() : renderProjectList()
 }

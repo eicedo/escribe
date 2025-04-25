@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useCallback } from 'react';
 import { OpenAI } from 'openai';
 
 const openai = new OpenAI({
@@ -6,23 +6,85 @@ const openai = new OpenAI({
   dangerouslyAllowBrowser: true, // Note: this should be backend-only in prod!
 });
 
-export function useOpenAI() {
-  const [response, setResponse] = useState('');
-  const [loading, setLoading] = useState(false);
+// Maximum number of messages to keep in history
+const MAX_HISTORY = 6;
 
-  const ask = async (text) => {
+export function useOpenAI() {
+  // Store chat history as an array of message objects
+  const [history, setHistory] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(null);
+  const [lastPrompt, setLastPrompt] = useState('');
+
+  // Helper to update history with new messages
+  const updateHistory = useCallback((newMessage) => {
+    setHistory(prev => {
+      const updated = [...prev, newMessage];
+      // Keep only the last MAX_HISTORY messages
+      return updated.slice(-MAX_HISTORY);
+    });
+  }, []);
+
+  const ask = async (text, options = {}) => {
+    const { regenerate = false, displayMessage } = options;
     setLoading(true);
+    setError(null);
+    
     try {
+      // If not regenerating, save the new prompt
+      if (!regenerate) {
+        setLastPrompt(text);
+        // Use displayMessage if provided, otherwise use the full text
+        updateHistory({ role: 'user', content: displayMessage || text });
+      }
+
+      // Prepare messages for API call
+      const messages = regenerate 
+        ? history.slice(0, -1) // Remove last response for regeneration
+        : history;
+
       const completion = await openai.chat.completions.create({
         model: 'gpt-3.5-turbo',
-        messages: [{ role: 'user', content: text }],
+        messages: [...messages, { role: 'user', content: regenerate ? lastPrompt : text }],
+        temperature: 0.7,
+        max_tokens: 500,
       });
-      setResponse(completion.choices[0].message.content);
+
+      const response = completion.choices[0].message;
+      updateHistory({ role: 'assistant', content: response.content });
+      
+      return response.content;
     } catch (err) {
-      setResponse('⚠️ Error reaching OpenAI');
+      const errorMessage = err.message || 'Error reaching OpenAI';
+      setError(errorMessage);
+      return `⚠️ ${errorMessage}`;
+    } finally {
+      setLoading(false);
     }
-    setLoading(false);
   };
 
-  return { ask, response, loading };
+  // Function to regenerate the last response
+  const regenerate = async () => {
+    if (lastPrompt) {
+      return ask(lastPrompt, { regenerate: true });
+    }
+    return null;
+  };
+
+  // Clear chat history
+  const clearHistory = useCallback(() => {
+    setHistory([]);
+    setLastPrompt('');
+    setError(null);
+  }, []);
+
+  return { 
+    ask, 
+    regenerate,
+    clearHistory,
+    history,
+    loading,
+    error,
+    lastPrompt 
+  };
 }
