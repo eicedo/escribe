@@ -141,6 +141,7 @@ export default function ProjectManager({ user }) {
     const fetchProjects = async () => {
       if (!user?.id) {
         console.log('[ProjectManager] No user ID, skipping fetch')
+        setIsLoading(false)
         return
       }
       
@@ -366,12 +367,25 @@ export default function ProjectManager({ user }) {
     
     try {
       const response = await ask(context, { displayMessage: question });
-      setProjectAIHistory(prev => [...prev, 
-        { role: 'user', content: question },
-        { role: 'assistant', content: response }
-      ]);
+      if (response.startsWith('⚠️')) {
+        // Handle error response
+        setProjectAIHistory(prev => [...prev, 
+          { role: 'user', content: question },
+          { role: 'assistant', content: response }
+        ]);
+      } else {
+        // Handle successful response
+        setProjectAIHistory(prev => [...prev, 
+          { role: 'user', content: question },
+          { role: 'assistant', content: response }
+        ]);
+      }
     } catch (error) {
       console.error('Error asking project AI:', error);
+      setProjectAIHistory(prev => [...prev, 
+        { role: 'user', content: question },
+        { role: 'assistant', content: '⚠️ Error: Could not get response from AI' }
+      ]);
     }
   };
 
@@ -388,128 +402,140 @@ export default function ProjectManager({ user }) {
         <div className="w-full max-w-4xl mx-auto p-6">
           <div className="mb-8">
             <h2 className="text-2xl font-bold mb-4">My Projects</h2>
-            <div className="mb-6">
-              <h3 className="text-lg font-semibold mb-2">Create New Project</h3>
-              <div className="space-y-2">
-                <input
-                  type="text"
-                  placeholder="Project name"
-                  value={projectName}
-                  onChange={(e) => {
-                    setProjectName(e.target.value)
-                    if (validationErrors.projectName) {
-                      setValidationErrors(prev => ({ ...prev, projectName: '' }))
-                    }
-                  }}
-                  className={`border rounded p-2 w-full ${
-                    validationErrors.projectName ? 'border-red-500 focus:ring-red-500' : 'focus:ring-blue-500'
-                  }`}
-                />
-                {validationErrors.projectName && (
-                  <p className="text-red-500 text-sm">{validationErrors.projectName}</p>
-                )}
-                <button
-                  onClick={handleCreateProject}
-                  disabled={loadingStates.create}
-                  className="relative inline-flex items-center justify-center p-0.5 mb-2 me-2 overflow-hidden text-sm font-medium rounded-lg group bg-gradient-to-r from-emerald-300 via-teal-200 to-orange-200 group-hover:from-emerald-300 group-hover:via-teal-200 group-hover:to-orange-200 focus:ring-4 focus:outline-none focus:ring-emerald-200"
-                >
-                  <span className="relative px-5 py-2.5 transition-all ease-in duration-75 bg-white rounded-md group-hover:bg-transparent text-gray-900 group-hover:text-gray-900">
-                    {loadingStates.create ? (
-                      <>
-                        Adding... <LoadingSpinner />
-                      </>
-                    ) : (
-                      'Add Project'
+            {isLoading ? (
+              <div className="flex items-center justify-center h-32">
+                <LoadingSpinner />
+              </div>
+            ) : error ? (
+              <div className="p-4 bg-red-50 border border-red-200 rounded-lg">
+                <p className="text-red-600">{error}</p>
+              </div>
+            ) : (
+              <>
+                <div className="mb-6">
+                  <h3 className="text-lg font-semibold mb-2">Create New Project</h3>
+                  <div className="space-y-2">
+                    <input
+                      type="text"
+                      placeholder="Project name"
+                      value={projectName}
+                      onChange={(e) => {
+                        setProjectName(e.target.value)
+                        if (validationErrors.projectName) {
+                          setValidationErrors(prev => ({ ...prev, projectName: '' }))
+                        }
+                      }}
+                      className={`border rounded p-2 w-full ${
+                        validationErrors.projectName ? 'border-red-500 focus:ring-red-500' : 'focus:ring-blue-500'
+                      }`}
+                    />
+                    {validationErrors.projectName && (
+                      <p className="text-red-500 text-sm">{validationErrors.projectName}</p>
                     )}
-                  </span>
-                </button>
-              </div>
-            </div>
-
-            <div className="space-y-3">
-              <h3 className="text-lg font-semibold">Projects:</h3>
-              <div className="grid gap-4">
-                {projects.map((p) => (
-                  <div
-                    key={p.id}
-                    className={`border rounded-lg p-4 ${
-                      p.id === activeProjectId ? 'border-blue-500 bg-blue-50' : 'hover:border-gray-400'
-                    } transition-all duration-200`}
-                  >
-                    <div className="flex justify-between items-center">
-                      <div className="flex-1">
-                        {editingProjectName === p.id ? (
-                          <input
-                            type="text"
-                            value={p.name}
-                            onChange={(e) => {
-                              setProjects(projects.map(proj =>
-                                proj.id === p.id ? { ...proj, name: e.target.value } : proj
-                              ))
-                            }}
-                            onBlur={() => {
-                              handleRenameProject(p.id, p.name)
-                              setEditingProjectName(null)
-                            }}
-                            onKeyDown={(e) => {
-                              if (e.key === 'Enter') {
-                                handleRenameProject(p.id, p.name)
-                                setEditingProjectName(null)
-                              }
-                            }}
-                            className="border rounded p-2 w-full"
-                            autoFocus
-                          />
+                    <button
+                      onClick={handleCreateProject}
+                      disabled={loadingStates.create}
+                      className="relative inline-flex items-center justify-center p-0.5 mb-2 me-2 overflow-hidden text-sm font-medium rounded-lg group bg-gradient-to-r from-emerald-300 via-teal-200 to-orange-200 group-hover:from-emerald-300 group-hover:via-teal-200 group-hover:to-orange-200 focus:ring-4 focus:outline-none focus:ring-emerald-200"
+                    >
+                      <span className="relative px-5 py-2.5 transition-all ease-in duration-75 bg-white rounded-md group-hover:bg-transparent text-gray-900 group-hover:text-gray-900">
+                        {loadingStates.create ? (
+                          <>
+                            Adding... <LoadingSpinner />
+                          </>
                         ) : (
-                          <div className="flex items-center justify-between">
-                            <h4 className="text-xl font-semibold">{p.name}</h4>
-                            <span className="text-sm text-gray-500">
-                              {p.sections?.length || 0} sections
-                            </span>
-                          </div>
+                          'Add Project'
                         )}
-                      </div>
-                    </div>
-                    <div className="mt-4 flex justify-between items-center">
-                      <button
-                        onClick={() => {
-                          setActiveProjectId(p.id)
-                          setActiveSectionId(null)
-                          setEditorText("")
-                        }}
-                        className="relative inline-flex items-center justify-center p-0.5 mb-2 me-2 overflow-hidden text-sm font-medium rounded-lg group bg-gradient-to-r from-emerald-300 via-teal-200 to-orange-200 group-hover:from-emerald-300 group-hover:via-teal-200 group-hover:to-orange-200 focus:ring-4 focus:outline-none focus:ring-emerald-200"
-                      >
-                        <span className="relative px-5 py-2.5 transition-all ease-in duration-75 bg-white rounded-md group-hover:bg-transparent text-gray-900 group-hover:text-gray-900">
-                          Open Project
-                        </span>
-                      </button>
-                      <div className="flex gap-2">
-                        <Tooltip text="Rename this project">
-                          <button
-                            onClick={() => setEditingProjectName(p.id)}
-                            className="relative inline-flex items-center justify-center p-0.5 mb-2 me-2 overflow-hidden text-sm font-medium rounded-lg group bg-gradient-to-r from-emerald-300 via-teal-200 to-orange-200 group-hover:from-emerald-300 group-hover:via-teal-200 group-hover:to-orange-200 focus:ring-4 focus:outline-none focus:ring-emerald-200"
-                          >
-                            <span className="relative px-5 py-2.5 transition-all ease-in duration-75 bg-white rounded-md group-hover:bg-transparent text-gray-900 group-hover:text-gray-900">
-                              Edit
-                            </span>
-                          </button>
-                        </Tooltip>
-                        <Tooltip text="Delete this project and all its sections">
-                          <button
-                            onClick={() => handleDeleteProject(p.id)}
-                            className="relative inline-flex items-center justify-center p-0.5 mb-2 me-2 overflow-hidden text-sm font-medium rounded-lg group bg-gradient-to-r from-emerald-300 via-teal-200 to-orange-200 group-hover:from-emerald-300 group-hover:via-teal-200 group-hover:to-orange-200 focus:ring-4 focus:outline-none focus:ring-emerald-200"
-                          >
-                            <span className="relative px-5 py-2.5 transition-all ease-in duration-75 bg-white rounded-md group-hover:bg-transparent text-gray-900 group-hover:text-gray-900">
-                              Delete
-                            </span>
-                          </button>
-                        </Tooltip>
-                      </div>
-                    </div>
+                      </span>
+                    </button>
                   </div>
-                ))}
-              </div>
-            </div>
+                </div>
+
+                <div className="space-y-3">
+                  <h3 className="text-lg font-semibold">Projects:</h3>
+                  <div className="grid gap-4">
+                    {projects.map((p) => (
+                      <div
+                        key={p.id}
+                        className={`border rounded-lg p-4 ${
+                          p.id === activeProjectId ? 'border-blue-500 bg-blue-50' : 'hover:border-gray-400'
+                        } transition-all duration-200`}
+                      >
+                        <div className="flex justify-between items-center">
+                          <div className="flex-1">
+                            {editingProjectName === p.id ? (
+                              <input
+                                type="text"
+                                value={p.name}
+                                onChange={(e) => {
+                                  setProjects(projects.map(proj =>
+                                    proj.id === p.id ? { ...proj, name: e.target.value } : proj
+                                  ))
+                                }}
+                                onBlur={() => {
+                                  handleRenameProject(p.id, p.name)
+                                  setEditingProjectName(null)
+                                }}
+                                onKeyDown={(e) => {
+                                  if (e.key === 'Enter') {
+                                    handleRenameProject(p.id, p.name)
+                                    setEditingProjectName(null)
+                                  }
+                                }}
+                                className="border rounded p-2 w-full"
+                                autoFocus
+                              />
+                            ) : (
+                              <div className="flex items-center justify-between">
+                                <h4 className="text-xl font-semibold">{p.name}</h4>
+                                <span className="text-sm text-gray-500">
+                                  {p.sections?.length || 0} sections
+                                </span>
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                        <div className="mt-4 flex justify-between items-center">
+                          <button
+                            onClick={() => {
+                              setActiveProjectId(p.id)
+                              setActiveSectionId(null)
+                              setEditorText("")
+                            }}
+                            className="relative inline-flex items-center justify-center p-0.5 mb-2 me-2 overflow-hidden text-sm font-medium rounded-lg group bg-gradient-to-r from-emerald-300 via-teal-200 to-orange-200 group-hover:from-emerald-300 group-hover:via-teal-200 group-hover:to-orange-200 focus:ring-4 focus:outline-none focus:ring-emerald-200"
+                          >
+                            <span className="relative px-5 py-2.5 transition-all ease-in duration-75 bg-white rounded-md group-hover:bg-transparent text-gray-900 group-hover:text-gray-900">
+                              Open Project
+                            </span>
+                          </button>
+                          <div className="flex gap-2">
+                            <Tooltip text="Rename this project">
+                              <button
+                                onClick={() => setEditingProjectName(p.id)}
+                                className="relative inline-flex items-center justify-center p-0.5 mb-2 me-2 overflow-hidden text-sm font-medium rounded-lg group bg-gradient-to-r from-emerald-300 via-teal-200 to-orange-200 group-hover:from-emerald-300 group-hover:via-teal-200 group-hover:to-orange-200 focus:ring-4 focus:outline-none focus:ring-emerald-200"
+                              >
+                                <span className="relative px-5 py-2.5 transition-all ease-in duration-75 bg-white rounded-md group-hover:bg-transparent text-gray-900 group-hover:text-gray-900">
+                                  Edit
+                                </span>
+                              </button>
+                            </Tooltip>
+                            <Tooltip text="Delete this project and all its sections">
+                              <button
+                                onClick={() => handleDeleteProject(p.id)}
+                                className="relative inline-flex items-center justify-center p-0.5 mb-2 me-2 overflow-hidden text-sm font-medium rounded-lg group bg-gradient-to-r from-emerald-300 via-teal-200 to-orange-200 group-hover:from-emerald-300 group-hover:via-teal-200 group-hover:to-orange-200 focus:ring-4 focus:outline-none focus:ring-emerald-200"
+                              >
+                                <span className="relative px-5 py-2.5 transition-all ease-in duration-75 bg-white rounded-md group-hover:bg-transparent text-gray-900 group-hover:text-gray-900">
+                                  Delete
+                                </span>
+                              </button>
+                            </Tooltip>
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </>
+            )}
           </div>
         </div>
       </div>

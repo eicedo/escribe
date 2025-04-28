@@ -4,8 +4,11 @@ import react from '@vitejs/plugin-react'
 export default defineConfig({
   plugins: [react()],
   server: {
-    port: 5173,  // Or whichever port you prefer
-    open: true,  // Automatically opens browser when running npm run dev
+    port: 5000
   },
-})
-
+  resolve: {
+    alias: {
+      '@': '/src'
+    }
+  }
+}) 
