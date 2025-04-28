@@ -1,6 +1,10 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useRef } from 'react'
 import { useOpenAI } from '../useOpenAI'
 import { supabase } from '../supabaseClient'
+import { Card, CardHeader, CardTitle, CardContent } from './ui/card'
+import { Button } from './ui/button'
+import { Progress } from './ui/progress'
+import { Activity, Users, FileText, Plus } from 'lucide-react'
 
 // Add Tooltip component at the top level
 const Tooltip = ({ children, text }) => {
@@ -79,6 +83,7 @@ const Modal = ({ isOpen, onClose, children }) => {
 };
 
 export default function ProjectManager({ user }) {
+  console.log('[ProjectManager] user:', user);
   console.log('[ProjectManager] Component mounted with user:', user)
 
   const [projects, setProjects] = useState([])
@@ -89,11 +94,12 @@ export default function ProjectManager({ user }) {
   const [activeProjectId, setActiveProjectId] = useState(null)
   const [activeSectionId, setActiveSectionId] = useState(null)
   const [editorText, setEditorText] = useState("")
+  const textareaRef = useRef(null);
   const [loadingStates, setLoadingStates] = useState({
     create: false,
     addSection: false
   })
-  const [isLoading, setIsLoading] = useState(true)
+  const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState(null)
   const [validationErrors, setValidationErrors] = useState({
     projectName: '',
@@ -101,8 +107,32 @@ export default function ProjectManager({ user }) {
   })
   const [isAIModalOpen, setIsAIModalOpen] = useState(false);
   const [projectAIHistory, setProjectAIHistory] = useState([]);
+  const [isAIChatMinimized, setIsAIChatMinimized] = useState(false)
 
   const { ask, response, loading, history, regenerate } = useOpenAI()
+
+  useEffect(() => {
+    const handleResize = () => {
+      if (textareaRef.current) {
+        const textareaWidth = textareaRef.current.offsetWidth;
+        const windowWidth = window.innerWidth;
+        if (textareaWidth > windowWidth * 0.7 && !isAIChatMinimized) {
+          setIsAIChatMinimized(true);
+        }
+      }
+    };
+
+    const resizeObserver = new ResizeObserver(handleResize);
+    if (textareaRef.current) {
+      resizeObserver.observe(textareaRef.current);
+    }
+
+    return () => {
+      if (textareaRef.current) {
+        resizeObserver.unobserve(textareaRef.current);
+      }
+    };
+  }, [isAIChatMinimized]);
 
   useEffect(() => {
     console.log('[ProjectManager] useEffect triggered with user:', user?.id)
@@ -345,135 +375,289 @@ export default function ProjectManager({ user }) {
     }
   };
 
-  const activeProject = projects.find((p) => p.id === activeProjectId)
-  const activeSection = activeProject?.sections.find((s) => s.id === activeSectionId)
+  const handleHomeClick = () => {
+    setActiveProjectId(null);
+    setActiveSectionId(null);
+    setEditorText("");
+  };
 
-  // Add a new function to render the project list view
+  // Update the project list view
   const renderProjectList = () => (
-    <div className="max-w-4xl mx-auto p-6">
-      <div className="mb-8">
-        <h2 className="text-2xl font-bold mb-4">My Projects</h2>
-        <div className="mb-6">
-          <h3 className="text-lg font-semibold mb-2">Create New Project</h3>
-          <div className="space-y-2">
-            <input
-              type="text"
-              placeholder="Project name"
-              value={projectName}
-              onChange={(e) => {
-                setProjectName(e.target.value)
-                if (validationErrors.projectName) {
-                  setValidationErrors(prev => ({ ...prev, projectName: '' }))
-                }
-              }}
-              className={`border rounded p-2 w-full ${
-                validationErrors.projectName ? 'border-red-500 focus:ring-red-500' : 'focus:ring-blue-500'
-              }`}
-            />
-            {validationErrors.projectName && (
-              <p className="text-red-500 text-sm">{validationErrors.projectName}</p>
-            )}
-            <button
-              onClick={handleCreateProject}
-              disabled={loadingStates.create}
-              className="mt-2 px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50 flex items-center justify-center"
-            >
-              {loadingStates.create ? (
-                <>
-                  Adding... <LoadingSpinner />
-                </>
-              ) : (
-                'Add Project'
-              )}
-            </button>
-          </div>
-        </div>
-
-        <div className="space-y-3">
-          <h3 className="text-lg font-semibold">Projects:</h3>
-          <div className="grid gap-4">
-            {projects.map((p) => (
-              <div
-                key={p.id}
-                className={`border rounded-lg p-4 ${
-                  p.id === activeProjectId ? 'border-blue-500 bg-blue-50' : 'hover:border-gray-400'
-                } transition-all duration-200`}
-              >
-                <div className="flex justify-between items-center">
-                  <div className="flex-1">
-                    {editingProjectName === p.id ? (
-                      <input
-                        type="text"
-                        value={p.name}
-                        onChange={(e) => {
-                          setProjects(projects.map(proj =>
-                            proj.id === p.id ? { ...proj, name: e.target.value } : proj
-                          ))
-                        }}
-                        onBlur={() => {
-                          handleRenameProject(p.id, p.name)
-                          setEditingProjectName(null)
-                        }}
-                        onKeyDown={(e) => {
-                          if (e.key === 'Enter') {
-                            handleRenameProject(p.id, p.name)
-                            setEditingProjectName(null)
-                          }
-                        }}
-                        className="border rounded p-2 w-full"
-                        autoFocus
-                      />
+    <div className="h-screen flex flex-col">
+      <div className="flex-1 overflow-y-auto">
+        <div className="w-full max-w-4xl mx-auto p-6">
+          <div className="mb-8">
+            <h2 className="text-2xl font-bold mb-4">My Projects</h2>
+            <div className="mb-6">
+              <h3 className="text-lg font-semibold mb-2">Create New Project</h3>
+              <div className="space-y-2">
+                <input
+                  type="text"
+                  placeholder="Project name"
+                  value={projectName}
+                  onChange={(e) => {
+                    setProjectName(e.target.value)
+                    if (validationErrors.projectName) {
+                      setValidationErrors(prev => ({ ...prev, projectName: '' }))
+                    }
+                  }}
+                  className={`border rounded p-2 w-full ${
+                    validationErrors.projectName ? 'border-red-500 focus:ring-red-500' : 'focus:ring-blue-500'
+                  }`}
+                />
+                {validationErrors.projectName && (
+                  <p className="text-red-500 text-sm">{validationErrors.projectName}</p>
+                )}
+                <button
+                  onClick={handleCreateProject}
+                  disabled={loadingStates.create}
+                  className="relative inline-flex items-center justify-center p-0.5 mb-2 me-2 overflow-hidden text-sm font-medium rounded-lg group bg-gradient-to-r from-emerald-300 via-teal-200 to-orange-200 group-hover:from-emerald-300 group-hover:via-teal-200 group-hover:to-orange-200 focus:ring-4 focus:outline-none focus:ring-emerald-200"
+                >
+                  <span className="relative px-5 py-2.5 transition-all ease-in duration-75 bg-white rounded-md group-hover:bg-transparent text-gray-900 group-hover:text-gray-900">
+                    {loadingStates.create ? (
+                      <>
+                        Adding... <LoadingSpinner />
+                      </>
                     ) : (
-                      <div className="flex items-center justify-between">
-                        <h4 className="text-xl font-semibold">{p.name}</h4>
-                        <span className="text-sm text-gray-500">
-                          {p.sections?.length || 0} sections
-                        </span>
-                      </div>
+                      'Add Project'
                     )}
-                  </div>
-                </div>
-                <div className="mt-4 flex justify-between items-center">
-                  <button
-                    onClick={() => {
-                      setActiveProjectId(p.id)
-                      setActiveSectionId(null)
-                      setEditorText("")
-                    }}
-                    className="px-4 py-2 bg-blue-100 text-blue-700 rounded hover:bg-blue-200 transition-colors duration-200"
-                  >
-                    Open Project
-                  </button>
-                  <div className="flex gap-2">
-                    <Tooltip text="Rename this project">
-                      <button
-                        onClick={() => setEditingProjectName(p.id)}
-                        className="text-yellow-600 hover:text-yellow-700 p-2 rounded transition-colors duration-200"
-                      >
-                        <span className="sr-only">Edit</span>
-                        Edit
-                      </button>
-                    </Tooltip>
-                    <Tooltip text="Delete this project and all its sections">
-                      <button
-                        onClick={() => handleDeleteProject(p.id)}
-                        className="text-red-600 hover:text-red-700 p-2 rounded transition-colors duration-200"
-                      >
-                        <span className="sr-only">Delete</span>
-                        Delete
-                      </button>
-                    </Tooltip>
-                  </div>
-                </div>
+                  </span>
+                </button>
               </div>
-            ))}
+            </div>
+
+            <div className="space-y-3">
+              <h3 className="text-lg font-semibold">Projects:</h3>
+              <div className="grid gap-4">
+                {projects.map((p) => (
+                  <div
+                    key={p.id}
+                    className={`border rounded-lg p-4 ${
+                      p.id === activeProjectId ? 'border-blue-500 bg-blue-50' : 'hover:border-gray-400'
+                    } transition-all duration-200`}
+                  >
+                    <div className="flex justify-between items-center">
+                      <div className="flex-1">
+                        {editingProjectName === p.id ? (
+                          <input
+                            type="text"
+                            value={p.name}
+                            onChange={(e) => {
+                              setProjects(projects.map(proj =>
+                                proj.id === p.id ? { ...proj, name: e.target.value } : proj
+                              ))
+                            }}
+                            onBlur={() => {
+                              handleRenameProject(p.id, p.name)
+                              setEditingProjectName(null)
+                            }}
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter') {
+                                handleRenameProject(p.id, p.name)
+                                setEditingProjectName(null)
+                              }
+                            }}
+                            className="border rounded p-2 w-full"
+                            autoFocus
+                          />
+                        ) : (
+                          <div className="flex items-center justify-between">
+                            <h4 className="text-xl font-semibold">{p.name}</h4>
+                            <span className="text-sm text-gray-500">
+                              {p.sections?.length || 0} sections
+                            </span>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                    <div className="mt-4 flex justify-between items-center">
+                      <button
+                        onClick={() => {
+                          setActiveProjectId(p.id)
+                          setActiveSectionId(null)
+                          setEditorText("")
+                        }}
+                        className="relative inline-flex items-center justify-center p-0.5 mb-2 me-2 overflow-hidden text-sm font-medium rounded-lg group bg-gradient-to-r from-emerald-300 via-teal-200 to-orange-200 group-hover:from-emerald-300 group-hover:via-teal-200 group-hover:to-orange-200 focus:ring-4 focus:outline-none focus:ring-emerald-200"
+                      >
+                        <span className="relative px-5 py-2.5 transition-all ease-in duration-75 bg-white rounded-md group-hover:bg-transparent text-gray-900 group-hover:text-gray-900">
+                          Open Project
+                        </span>
+                      </button>
+                      <div className="flex gap-2">
+                        <Tooltip text="Rename this project">
+                          <button
+                            onClick={() => setEditingProjectName(p.id)}
+                            className="relative inline-flex items-center justify-center p-0.5 mb-2 me-2 overflow-hidden text-sm font-medium rounded-lg group bg-gradient-to-r from-emerald-300 via-teal-200 to-orange-200 group-hover:from-emerald-300 group-hover:via-teal-200 group-hover:to-orange-200 focus:ring-4 focus:outline-none focus:ring-emerald-200"
+                          >
+                            <span className="relative px-5 py-2.5 transition-all ease-in duration-75 bg-white rounded-md group-hover:bg-transparent text-gray-900 group-hover:text-gray-900">
+                              Edit
+                            </span>
+                          </button>
+                        </Tooltip>
+                        <Tooltip text="Delete this project and all its sections">
+                          <button
+                            onClick={() => handleDeleteProject(p.id)}
+                            className="relative inline-flex items-center justify-center p-0.5 mb-2 me-2 overflow-hidden text-sm font-medium rounded-lg group bg-gradient-to-r from-emerald-300 via-teal-200 to-orange-200 group-hover:from-emerald-300 group-hover:via-teal-200 group-hover:to-orange-200 focus:ring-4 focus:outline-none focus:ring-emerald-200"
+                          >
+                            <span className="relative px-5 py-2.5 transition-all ease-in duration-75 bg-white rounded-md group-hover:bg-transparent text-gray-900 group-hover:text-gray-900">
+                              Delete
+                            </span>
+                          </button>
+                        </Tooltip>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
           </div>
         </div>
       </div>
     </div>
   )
 
-  // Add a new function to render the project detail view
+  // Update the section detail view
+  const renderSectionDetail = () => {
+    const activeProject = projects.find(p => p.id === activeProjectId)
+    const activeSection = activeProject?.sections.find(s => s.id === activeSectionId)
+    
+    if (!activeSection) return null;
+
+    return (
+      <div className="h-screen flex flex-col">
+        {/* Section Header */}
+        <div className="bg-white border-b px-6 py-4">
+          <div className="flex items-center justify-between max-w-6xl mx-auto">
+            <div className="flex items-center gap-4">
+              <button
+                onClick={() => {
+                  setActiveSectionId(null)
+                  setEditorText("")
+                }}
+                className="relative inline-flex items-center justify-center p-0.5 mb-2 me-2 overflow-hidden text-sm font-medium rounded-lg group bg-gradient-to-r from-emerald-300 via-teal-200 to-orange-200 group-hover:from-emerald-300 group-hover:via-teal-200 group-hover:to-orange-200 focus:ring-4 focus:outline-none focus:ring-emerald-200"
+              >
+                <span className="relative px-5 py-2.5 transition-all ease-in duration-75 bg-white rounded-md group-hover:bg-transparent text-gray-900 group-hover:text-gray-900">
+                  ← Back to Project
+                </span>
+              </button>
+              <h1 className="text-2xl font-bold">{activeSection.name}</h1>
+            </div>
+          </div>
+        </div>
+
+        {/* Main Content */}
+        <div className="flex-1 flex overflow-hidden">
+          {/* Content Area */}
+          <div className="flex-1 overflow-y-auto p-6">
+            <div className="max-w-3xl mx-auto space-y-4">
+              <div className="flex items-center justify-between">
+                <h2 className="text-xl font-semibold">
+                  Editing: {activeSection.name}
+                </h2>
+                <button
+                  onClick={handleSaveContent}
+                  className="relative inline-flex items-center justify-center p-0.5 mb-2 me-2 overflow-hidden text-sm font-medium rounded-lg group bg-gradient-to-r from-emerald-300 via-teal-200 to-orange-200 group-hover:from-emerald-300 group-hover:via-teal-200 group-hover:to-orange-200 focus:ring-4 focus:outline-none focus:ring-emerald-200"
+                >
+                  <span className="relative px-5 py-2.5 transition-all ease-in duration-75 bg-white rounded-md group-hover:bg-transparent text-gray-900 group-hover:text-gray-900">
+                    Save Changes
+                  </span>
+                </button>
+              </div>
+              <textarea
+                ref={textareaRef}
+                className="w-full h-[calc(100vh-250px)] border rounded-lg p-4 font-mono resize-both overflow-auto min-w-[300px] min-h-[200px]"
+                value={editorText}
+                onChange={(e) => setEditorText(e.target.value)}
+                placeholder="Write your content here..."
+              />
+            </div>
+          </div>
+
+          {/* AI Assistant Sidebar */}
+          <div className={`border-l bg-white flex flex-col transition-all duration-300 ${isAIChatMinimized ? 'w-10' : 'w-96'}`}>
+            <div className="p-2 border-b flex justify-between items-center">
+              {!isAIChatMinimized && (
+                <h2 className="text-lg font-semibold">Project AI Assistant</h2>
+              )}
+              <button
+                onClick={() => setIsAIChatMinimized(!isAIChatMinimized)}
+                className="p-1 hover:bg-gray-100 rounded-full"
+              >
+                {isAIChatMinimized ? (
+                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 5l7 7-7 7" />
+                  </svg>
+                ) : (
+                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 19l-7-7 7-7" />
+                  </svg>
+                )}
+              </button>
+            </div>
+            {!isAIChatMinimized && (
+              <>
+                <div className="p-4 border-b">
+                  <div className="flex gap-2">
+                    <input
+                      type="text"
+                      placeholder="Ask AI about this project..."
+                      className="flex-1 border rounded-lg px-4 py-2"
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' && !e.shiftKey) {
+                          e.preventDefault();
+                          const question = e.target.value.trim();
+                          if (question) {
+                            askProjectAI(question);
+                            e.target.value = '';
+                          }
+                        }
+                      }}
+                    />
+                    <button
+                      onClick={() => {
+                        const input = document.querySelector('input[placeholder="Ask AI about this project..."]');
+                        const question = input.value.trim();
+                        if (question) {
+                          askProjectAI(question);
+                          input.value = '';
+                        }
+                      }}
+                      disabled={loading}
+                      className="relative inline-flex items-center justify-center p-0.5 overflow-hidden text-sm font-medium rounded-lg group bg-gradient-to-r from-emerald-300 via-teal-200 to-orange-200 group-hover:from-emerald-300 group-hover:via-teal-200 group-hover:to-orange-200 focus:ring-4 focus:outline-none focus:ring-emerald-200 whitespace-nowrap min-w-[90px]"
+                    >
+                      <span className="relative w-full px-3 py-2.5 transition-all ease-in duration-75 bg-white rounded-md group-hover:bg-transparent text-gray-900 group-hover:text-gray-900">
+                        {loading ? (
+                          <>
+                            <span>Thinking</span>
+                            <LoadingSpinner />
+                          </>
+                        ) : (
+                          'Ask AI'
+                        )}
+                      </span>
+                    </button>
+                  </div>
+                </div>
+                <div className="flex-1 overflow-y-auto p-4">
+                  <div className="space-y-4">
+                    {[...projectAIHistory].reverse().map((message, index) => (
+                      <ChatMessage
+                        key={index}
+                        message={message}
+                        onRegenerate={message.role === 'assistant' ? () => askProjectAI(projectAIHistory[projectAIHistory.length - index - 2].content) : undefined}
+                      />
+                    ))}
+                  </div>
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+      </div>
+    )
+  }
+
+  // Update the project detail view
   const renderProjectDetail = () => {
     const activeProject = projects.find(p => p.id === activeProjectId)
     if (!activeProject) return null
@@ -489,84 +673,16 @@ export default function ProjectManager({ user }) {
                   setActiveProjectId(null)
                   setActiveSectionId(null)
                 }}
-                className="text-gray-600 hover:text-gray-900"
+                className="relative inline-flex items-center justify-center p-0.5 mb-2 me-2 overflow-hidden text-sm font-medium rounded-lg group bg-gradient-to-r from-emerald-300 via-teal-200 to-orange-200 group-hover:from-emerald-300 group-hover:via-teal-200 group-hover:to-orange-200 focus:ring-4 focus:outline-none focus:ring-emerald-200"
               >
-                ← Back to Projects
+                <span className="relative px-5 py-2.5 transition-all ease-in duration-75 bg-white rounded-md group-hover:bg-transparent text-gray-900 group-hover:text-gray-900">
+                  ← Back to Projects
+                </span>
               </button>
               <h1 className="text-2xl font-bold">{activeProject.name}</h1>
             </div>
-            <button
-              onClick={() => setIsAIModalOpen(true)}
-              className="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors duration-200 flex items-center gap-2"
-            >
-              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 10V3L4 14h7v7l9-11h-7z" />
-              </svg>
-              Project AI Assistant
-            </button>
           </div>
         </div>
-
-        {/* AI Assistant Modal */}
-        <Modal isOpen={isAIModalOpen} onClose={() => setIsAIModalOpen(false)}>
-          <div className="space-y-4">
-            <h2 className="text-2xl font-bold mb-4">Project AI Assistant</h2>
-            <p className="text-gray-600 mb-4">
-              Ask questions about any part of your project. The AI has access to all sections.
-            </p>
-            
-            {/* AI Input */}
-            <div className="flex gap-2 mb-6">
-              <input
-                type="text"
-                placeholder="Ask about any chapter or section..."
-                className="flex-1 border rounded-lg px-4 py-2"
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter' && !e.shiftKey) {
-                    e.preventDefault();
-                    const question = e.target.value.trim();
-                    if (question) {
-                      askProjectAI(question);
-                      e.target.value = '';
-                    }
-                  }
-                }}
-              />
-              <button
-                onClick={() => {
-                  const input = document.querySelector('input[placeholder="Ask about any chapter or section..."]');
-                  const question = input.value.trim();
-                  if (question) {
-                    askProjectAI(question);
-                    input.value = '';
-                  }
-                }}
-                disabled={loading}
-                className={`px-4 py-2 bg-purple-600 text-white rounded hover:bg-purple-700 transition-colors duration-200 flex items-center space-x-2 ${loading ? 'opacity-75 cursor-not-allowed' : ''}`}
-              >
-                {loading ? (
-                  <>
-                    <span>Thinking</span>
-                    <LoadingSpinner />
-                  </>
-                ) : (
-                  'Ask AI'
-                )}
-              </button>
-            </div>
-
-            {/* Chat History */}
-            <div className="space-y-4">
-              {projectAIHistory.map((message, index) => (
-                <ChatMessage
-                  key={index}
-                  message={message}
-                  onRegenerate={message.role === 'assistant' ? () => askProjectAI(projectAIHistory[index - 1].content) : undefined}
-                />
-              ))}
-            </div>
-          </div>
-        </Modal>
 
         {/* Main Content */}
         <div className="flex-1 flex overflow-hidden">
@@ -595,15 +711,17 @@ export default function ProjectManager({ user }) {
                 <button
                   onClick={handleAddSection}
                   disabled={loadingStates.addSection}
-                  className="w-full px-4 py-2 bg-green-600 text-white rounded hover:bg-green-700 disabled:opacity-50 flex items-center justify-center"
+                  className="relative inline-flex items-center justify-center p-0.5 mb-2 me-2 overflow-hidden text-sm font-medium rounded-lg group bg-gradient-to-r from-emerald-300 via-teal-200 to-orange-200 group-hover:from-emerald-300 group-hover:via-teal-200 group-hover:to-orange-200 focus:ring-4 focus:outline-none focus:ring-emerald-200"
                 >
-                  {loadingStates.addSection ? (
-                    <>
-                      Adding... <LoadingSpinner />
-                    </>
-                  ) : (
-                    'Add Section'
-                  )}
+                  <span className="relative px-5 py-2.5 transition-all ease-in duration-75 bg-white rounded-md group-hover:bg-transparent text-gray-900 group-hover:text-gray-900">
+                    {loadingStates.addSection ? (
+                      <>
+                        Adding... <LoadingSpinner />
+                      </>
+                    ) : (
+                      'Add Section'
+                    )}
+                  </span>
                 </button>
               </div>
             </div>
@@ -611,7 +729,10 @@ export default function ProjectManager({ user }) {
               {activeProject.sections?.map((section) => (
                 <div
                   key={section.id}
-                  onClick={() => handleSelectSection(section)}
+                  onClick={() => {
+                    setActiveSectionId(section.id)
+                    setEditorText(section.content || "")
+                  }}
                   className={`p-3 rounded-lg mb-2 cursor-pointer transition-all duration-200 ${
                     section.id === activeSectionId
                       ? 'bg-blue-500 text-white'
@@ -620,19 +741,7 @@ export default function ProjectManager({ user }) {
                 >
                   <div className="flex items-center justify-between">
                     <span className="font-medium">{section.name}</span>
-                    <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                      <Tooltip text="Rename section">
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation()
-                            setEditingSectionName(section.id)
-                          }}
-                          className="p-1 text-gray-600 hover:text-gray-900 rounded"
-                        >
-                          <span className="sr-only">Edit</span>
-                          Edit
-                        </button>
-                      </Tooltip>
+                    <div className="flex gap-1">
                       <Tooltip text="Delete section">
                         <button
                           onClick={(e) => {
@@ -649,10 +758,11 @@ export default function ProjectManager({ user }) {
                               ))
                             }
                           }}
-                          className="p-1 text-gray-600 hover:text-gray-900 rounded"
+                          className="relative inline-flex items-center justify-center p-0.5 overflow-hidden text-[10px] font-medium rounded group bg-gradient-to-r from-emerald-300 via-teal-200 to-orange-200 group-hover:from-emerald-300 group-hover:via-teal-200 group-hover:to-orange-200 focus:ring-2 focus:outline-none focus:ring-emerald-200"
                         >
-                          <span className="sr-only">Delete</span>
-                          Delete
+                          <span className="relative px-2 py-1 transition-all ease-in duration-75 bg-white rounded group-hover:bg-transparent text-gray-900 group-hover:text-gray-900">
+                            Delete
+                          </span>
                         </button>
                       </Tooltip>
                     </div>
@@ -664,86 +774,88 @@ export default function ProjectManager({ user }) {
 
           {/* Content Area */}
           <div className="flex-1 overflow-y-auto p-6">
-            {activeSection ? (
-              <div className="max-w-3xl mx-auto space-y-4">
-                <div className="flex items-center justify-between">
-                  <h2 className="text-xl font-semibold">
-                    Editing: {activeSection.name}
-                  </h2>
-                  <button
-                    onClick={handleSaveContent}
-                    className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 transition-colors duration-200"
-                  >
-                    Save Changes
-                  </button>
-                </div>
-                <textarea
-                  className="w-full h-[calc(100vh-650px)] border rounded-lg p-4 font-mono"
-                  value={editorText}
-                  onChange={(e) => setEditorText(e.target.value)}
-                  placeholder="Write your content here..."
-                />
+            <div className="flex items-center justify-center h-full text-gray-500">
+              Select a section to start editing
+            </div>
+          </div>
 
-                {/* AI Assistant Section */}
-                <div className="border-t pt-4 mt-4">
-                  <h3 className="text-lg font-semibold mb-3">AI Assistant</h3>
-                  <div className="flex gap-2 mb-4">
+          {/* AI Assistant Sidebar */}
+          <div className={`border-l bg-white flex flex-col transition-all duration-300 ${isAIChatMinimized ? 'w-10' : 'w-96'}`}>
+            <div className="p-2 border-b flex justify-between items-center">
+              {!isAIChatMinimized && (
+                <h2 className="text-lg font-semibold">Project AI Assistant</h2>
+              )}
+              <button
+                onClick={() => setIsAIChatMinimized(!isAIChatMinimized)}
+                className="p-1 hover:bg-gray-100 rounded-full"
+              >
+                {isAIChatMinimized ? (
+                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 5l7 7-7 7" />
+                  </svg>
+                ) : (
+                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 19l-7-7 7-7" />
+                  </svg>
+                )}
+              </button>
+            </div>
+            {!isAIChatMinimized && (
+              <>
+                <div className="p-4 border-b">
+                  <div className="flex gap-2">
                     <input
                       type="text"
-                      placeholder="Ask AI about your content..."
+                      placeholder="Ask AI about this project..."
                       className="flex-1 border rounded-lg px-4 py-2"
                       onKeyDown={(e) => {
                         if (e.key === 'Enter' && !e.shiftKey) {
                           e.preventDefault();
-                          const userQuestion = e.target.value;
-                          // Send full context to AI but only display the question
-                          ask(`Regarding this content:\n\n${editorText}\n\nQuestion: ${userQuestion}`, {
-                            displayMessage: userQuestion
-                          });
-                          e.target.value = '';
+                          const question = e.target.value.trim();
+                          if (question) {
+                            askProjectAI(question);
+                            e.target.value = '';
+                          }
                         }
                       }}
                     />
                     <button
                       onClick={() => {
-                        const input = document.querySelector('input[placeholder="Ask AI about your content..."]');
-                        const userQuestion = input.value.trim();
-                        if (userQuestion) {
-                          // Send full context to AI but only display the question
-                          ask(`Regarding this content:\n\n${editorText}\n\nQuestion: ${userQuestion}`, {
-                            displayMessage: userQuestion
-                          });
+                        const input = document.querySelector('input[placeholder="Ask AI about this project..."]');
+                        const question = input.value.trim();
+                        if (question) {
+                          askProjectAI(question);
                           input.value = '';
                         }
                       }}
                       disabled={loading}
-                      className={`px-4 py-2 bg-purple-600 text-white rounded hover:bg-purple-700 transition-colors duration-200 flex items-center space-x-2 ${loading ? 'opacity-75 cursor-not-allowed' : ''}`}
+                      className="relative inline-flex items-center justify-center p-0.5 overflow-hidden text-sm font-medium rounded-lg group bg-gradient-to-r from-emerald-300 via-teal-200 to-orange-200 group-hover:from-emerald-300 group-hover:via-teal-200 group-hover:to-orange-200 focus:ring-4 focus:outline-none focus:ring-emerald-200 whitespace-nowrap min-w-[90px]"
                     >
-                      {loading ? (
-                        <>
-                          <span>Thinking</span>
-                          <LoadingSpinner />
-                        </>
-                      ) : (
-                        'Ask AI'
-                      )}
+                      <span className="relative w-full px-3 py-2.5 transition-all ease-in duration-75 bg-white rounded-md group-hover:bg-transparent text-gray-900 group-hover:text-gray-900">
+                        {loading ? (
+                          <>
+                            <span>Thinking</span>
+                            <LoadingSpinner />
+                          </>
+                        ) : (
+                          'Ask AI'
+                        )}
+                      </span>
                     </button>
                   </div>
-                  <div className="space-y-4 max-h-[300px] overflow-y-auto">
-                    {history.map((message, index) => (
+                </div>
+                <div className="flex-1 overflow-y-auto p-4">
+                  <div className="space-y-4">
+                    {[...projectAIHistory].reverse().map((message, index) => (
                       <ChatMessage
                         key={index}
                         message={message}
-                        onRegenerate={message.role === 'assistant' ? regenerate : undefined}
+                        onRegenerate={message.role === 'assistant' ? () => askProjectAI(projectAIHistory[projectAIHistory.length - index - 2].content) : undefined}
                       />
                     ))}
                   </div>
                 </div>
-              </div>
-            ) : (
-              <div className="flex items-center justify-center h-full text-gray-500">
-                Select a section to start editing
-              </div>
+              </>
             )}
           </div>
         </div>
@@ -751,21 +863,6 @@ export default function ProjectManager({ user }) {
     )
   }
 
-  if (error) {
-    return (
-      <div className="flex h-screen items-center justify-center">
-        <div className="text-red-600">Error loading projects: {error}</div>
-      </div>
-    )
-  }
-
-  if (isLoading) {
-    return (
-      <div className="flex h-screen items-center justify-center">
-        <div className="w-8 h-8 border-4 border-blue-600 border-t-transparent rounded-full animate-spin"></div>
-      </div>
-    )
-  }
-
-  return activeProjectId ? renderProjectDetail() : renderProjectList()
+  // Update the main return statement to include the section detail view
+  return activeSectionId ? renderSectionDetail() : activeProjectId ? renderProjectDetail() : renderProjectList()
 }

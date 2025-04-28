@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="240" height="80" viewBox="0 0 240 80" version="1.1" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="logoGradient" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" style="stop-color:#FFB6A3"/>
+      <stop offset="30%" style="stop-color:#FFB6A3"/>
+      <stop offset="40%" style="stop-color:#D4DBA7"/>
+      <stop offset="60%" style="stop-color:#A8E6CE"/>
+      <stop offset="100%" style="stop-color:#A8E6CE"/>
+    </linearGradient>
+  </defs>
+  
+  <!-- Text -->
+  <text x="10" y="50" font-family="Arial" font-size="48" font-weight="bold" fill="url(#logoGradient)">
+    escribe
+  </text>
+  
+  <!-- Feather -->
+  <g transform="translate(180, 5)" fill="#A8E6CE">
+    <path d="
+      M0 40 
+      C10 35, 15 30, 18 20
+      C20 15, 20 10, 20 5
+      L25 0
+      C25 10, 23 20, 20 25
+      C15 35, 10 40, 0 40
+      Z" 
+    />
+    <!-- Feather details -->
+    <path d="
+      M5 35
+      C12 30, 15 25, 17 20
+      M8 30
+      C13 25, 15 20, 16 15
+      M11 25
+      C14 20, 15 15, 15 10
+    " 
+    fill="none" 
+    stroke="#A8E6CE" 
+    stroke-width="1.5"
+    />
+  </g>
+</svg> 

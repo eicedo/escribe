@@ -1,13 +1,14 @@
 import { useState, useCallback } from 'react';
 import { OpenAI } from 'openai';
 
+// Maximum number of messages to keep in history
+const MAX_HISTORY = 6;
+
+// Initialize OpenAI client with API key from environment variable
 const openai = new OpenAI({
   apiKey: import.meta.env.VITE_OPENAI_API_KEY,
   dangerouslyAllowBrowser: true, // Note: this should be backend-only in prod!
 });
-
-// Maximum number of messages to keep in history
-const MAX_HISTORY = 6;
 
 export function useOpenAI() {
   // Store chat history as an array of message objects
@@ -55,6 +56,7 @@ export function useOpenAI() {
       
       return response.content;
     } catch (err) {
+      console.error('OpenAI API error:', err);
       const errorMessage = err.message || 'Error reaching OpenAI';
       setError(errorMessage);
       return `⚠️ ${errorMessage}`;
