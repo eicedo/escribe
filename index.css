@@ -2,4 +2,27 @@
 @tailwind components;
 @tailwind utilities;
 
+body {
+  background: #f8f7f3;
+}
+
+.bg-old-paper {
+  background: #f3ecd4;
+  background-image: url('https://www.transparenttextures.com/patterns/old-mathematics.png');
+  background-repeat: repeat;
+}
+
+.username-gradient-stroke {
+  background: linear-gradient(90deg, #FFB6A3 0%, #D4DBA7 50%, #A8E6CE 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+  color: transparent;
+  font-weight: bold;
+}
+
+.dropdown-toggle-no-caret::after {
+  display: none !important;
+}
+
   
