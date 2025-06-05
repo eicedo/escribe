@@ -5,6 +5,8 @@ import { Card, CardHeader, CardTitle, CardContent } from './ui/card'
 import { Button } from './ui/button'
 import { Progress } from './ui/progress'
 import { Activity, Users, FileText, Plus } from 'lucide-react'
+import { EditorPane } from './ProjectManager/EditorPane'
+import { Chrono } from 'react-chrono'
 
 // Add Tooltip component at the top level
 const Tooltip = ({ children, text }) => {
@@ -82,6 +84,14 @@ const Modal = ({ isOpen, onClose, children }) => {
   );
 };
 
+// Add this helper function at the top level
+const stripHtml = (html) => {
+  if (!html) return '';
+  const tmp = document.createElement('DIV');
+  tmp.innerHTML = html;
+  return tmp.textContent || tmp.innerText || '';
+};
+
 export default function ProjectManager({ user }) {
   console.log('[ProjectManager] user:', user);
   console.log('[ProjectManager] Component mounted with user:', user)
@@ -93,7 +103,6 @@ export default function ProjectManager({ user }) {
   const [editingSectionName, setEditingSectionName] = useState(null)
   const [activeProjectId, setActiveProjectId] = useState(null)
   const [activeSectionId, setActiveSectionId] = useState(null)
-  const [editorText, setEditorText] = useState("")
   const textareaRef = useRef(null);
   const [loadingStates, setLoadingStates] = useState({
     create: false,
@@ -101,6 +110,7 @@ export default function ProjectManager({ user }) {
   })
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState(null)
+  const [saveConfirmation, setSaveConfirmation] = useState(false)
   const [validationErrors, setValidationErrors] = useState({
     projectName: '',
     sectionName: ''
@@ -108,6 +118,8 @@ export default function ProjectManager({ user }) {
   const [isAIModalOpen, setIsAIModalOpen] = useState(false);
   const [projectAIHistory, setProjectAIHistory] = useState([]);
   const [isAIChatMinimized, setIsAIChatMinimized] = useState(false)
+  const [sectionHighlights, setSectionHighlights] = useState({});
+  const [isGeneratingHighlights, setIsGeneratingHighlights] = useState(false);
 
   const { ask, response, loading, history, regenerate } = useOpenAI()
 
@@ -245,7 +257,6 @@ export default function ProjectManager({ user }) {
       if (activeProjectId === id) {
         setActiveProjectId(null)
         setActiveSectionId(null)
-        setEditorText("")
       }
     } finally {
       setLoadingStates(prev => ({ ...prev, [id]: false }))
@@ -305,13 +316,14 @@ export default function ProjectManager({ user }) {
     }
   }
 
-  const handleSaveContent = async () => {
+  const handleSaveContent = async (content, showConfirmation = false) => {
+    // content: { html, json }
     const updatedProjects = projects.map((p) =>
       p.id === activeProjectId
         ? {
             ...p,
             sections: p.sections.map((s) =>
-              s.id === activeSectionId ? { ...s, content: editorText } : s
+              s.id === activeSectionId ? { ...s, content: content.html, jsonContent: content.json } : s
             ),
           }
         : p
@@ -328,12 +340,17 @@ export default function ProjectManager({ user }) {
 
     if (error) {
       console.error('Failed to save to Supabase:', error)
+      setError('Failed to save changes')
+    } else if (showConfirmation) {
+      setSaveConfirmation(true)
+      setTimeout(() => {
+        setSaveConfirmation(false)
+      }, 2000)
     }
   }
 
   const handleSelectSection = (section) => {
     setActiveSectionId(section.id)
-    setEditorText(section.content || "")
   }
 
   const exportSection = (name, content, format) => {
@@ -392,7 +409,47 @@ export default function ProjectManager({ user }) {
   const handleHomeClick = () => {
     setActiveProjectId(null);
     setActiveSectionId(null);
-    setEditorText("");
+  };
+
+  // Add this function to generate highlights
+  const generateSectionHighlights = async (section) => {
+    if (sectionHighlights[section.id]) return; // Skip if already generated
+
+    try {
+      const prompt = `Please provide 3-4 key highlights or main points from this chapter content. Format as a bullet point list. Content: ${section.content || ''}`;
+      const response = await ask(prompt);
+      
+      // Force a state update by creating a new object
+      setSectionHighlights(prev => {
+        const newHighlights = {
+          ...prev,
+          [section.id]: response
+        };
+        return newHighlights;
+      });
+    } catch (error) {
+      console.error('Error generating highlights:', error);
+    }
+  };
+
+  // Add new function to generate all highlights
+  const generateAllHighlights = async () => {
+    const activeProject = projects.find(p => p.id === activeProjectId);
+    if (!activeProject?.sections) return;
+
+    setIsGeneratingHighlights(true);
+    try {
+      // Generate highlights for all sections in parallel
+      const highlightPromises = activeProject.sections.map(section => generateSectionHighlights(section));
+      await Promise.all(highlightPromises);
+      
+      // Force a re-render by updating the projects state
+      setProjects(prev => [...prev]);
+    } catch (error) {
+      console.error('Error generating all highlights:', error);
+    } finally {
+      setIsGeneratingHighlights(false);
+    }
   };
 
   // Update the project list view
@@ -499,7 +556,6 @@ export default function ProjectManager({ user }) {
                             onClick={() => {
                               setActiveProjectId(p.id)
                               setActiveSectionId(null)
-                              setEditorText("")
                             }}
                             className="relative inline-flex items-center justify-center p-0.5 mb-2 me-2 overflow-hidden text-sm font-medium rounded-lg group bg-gradient-to-r from-emerald-300 via-teal-200 to-orange-200 group-hover:from-emerald-300 group-hover:via-teal-200 group-hover:to-orange-200 focus:ring-4 focus:outline-none focus:ring-emerald-200"
                           >
@@ -542,151 +598,27 @@ export default function ProjectManager({ user }) {
     </div>
   )
 
-  // Update the section detail view
-  const renderSectionDetail = () => {
-    const activeProject = projects.find(p => p.id === activeProjectId)
-    const activeSection = activeProject?.sections.find(s => s.id === activeSectionId)
-    
-    if (!activeSection) return null;
-
-    return (
-      <div className="h-screen flex flex-col">
-        {/* Section Header */}
-        <div className="bg-white border-b px-6 py-4">
-          <div className="flex items-center justify-between max-w-6xl mx-auto">
-            <div className="flex items-center gap-4">
-              <button
-                onClick={() => {
-                  setActiveSectionId(null)
-                  setEditorText("")
-                }}
-                className="relative inline-flex items-center justify-center p-0.5 mb-2 me-2 overflow-hidden text-sm font-medium rounded-lg group bg-gradient-to-r from-emerald-300 via-teal-200 to-orange-200 group-hover:from-emerald-300 group-hover:via-teal-200 group-hover:to-orange-200 focus:ring-4 focus:outline-none focus:ring-emerald-200"
-              >
-                <span className="relative px-5 py-2.5 transition-all ease-in duration-75 bg-white rounded-md group-hover:bg-transparent text-gray-900 group-hover:text-gray-900">
-                  ← Back to Project
-                </span>
-              </button>
-              <h1 className="text-2xl font-bold">{activeSection.name}</h1>
-            </div>
-          </div>
-        </div>
-
-        {/* Main Content */}
-        <div className="flex-1 flex overflow-hidden">
-          {/* Content Area */}
-          <div className="flex-1 overflow-y-auto p-6">
-            <div className="max-w-3xl mx-auto space-y-4">
-              <div className="flex items-center justify-between">
-                <h2 className="text-xl font-semibold">
-                  Editing: {activeSection.name}
-                </h2>
-                <button
-                  onClick={handleSaveContent}
-                  className="relative inline-flex items-center justify-center p-0.5 mb-2 me-2 overflow-hidden text-sm font-medium rounded-lg group bg-gradient-to-r from-emerald-300 via-teal-200 to-orange-200 group-hover:from-emerald-300 group-hover:via-teal-200 group-hover:to-orange-200 focus:ring-4 focus:outline-none focus:ring-emerald-200"
-                >
-                  <span className="relative px-5 py-2.5 transition-all ease-in duration-75 bg-white rounded-md group-hover:bg-transparent text-gray-900 group-hover:text-gray-900">
-                    Save Changes
-                  </span>
-                </button>
-              </div>
-              <textarea
-                ref={textareaRef}
-                className="w-full h-[calc(100vh-250px)] border rounded-lg p-4 font-mono resize-both overflow-auto min-w-[300px] min-h-[200px]"
-                value={editorText}
-                onChange={(e) => setEditorText(e.target.value)}
-                placeholder="Write your content here..."
-              />
-            </div>
-          </div>
-
-          {/* AI Assistant Sidebar */}
-          <div className={`border-l bg-white flex flex-col transition-all duration-300 ${isAIChatMinimized ? 'w-10' : 'w-96'}`}>
-            <div className="p-2 border-b flex justify-between items-center">
-              {!isAIChatMinimized && (
-                <h2 className="text-lg font-semibold">Project AI Assistant</h2>
-              )}
-              <button
-                onClick={() => setIsAIChatMinimized(!isAIChatMinimized)}
-                className="p-1 hover:bg-gray-100 rounded-full"
-              >
-                {isAIChatMinimized ? (
-                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 5l7 7-7 7" />
-                  </svg>
-                ) : (
-                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 19l-7-7 7-7" />
-                  </svg>
-                )}
-              </button>
-            </div>
-            {!isAIChatMinimized && (
-              <>
-                <div className="p-4 border-b">
-                  <div className="flex gap-2">
-                    <input
-                      type="text"
-                      placeholder="Ask AI about this project..."
-                      className="flex-1 border rounded-lg px-4 py-2"
-                      onKeyDown={(e) => {
-                        if (e.key === 'Enter' && !e.shiftKey) {
-                          e.preventDefault();
-                          const question = e.target.value.trim();
-                          if (question) {
-                            askProjectAI(question);
-                            e.target.value = '';
-                          }
-                        }
-                      }}
-                    />
-                    <button
-                      onClick={() => {
-                        const input = document.querySelector('input[placeholder="Ask AI about this project..."]');
-                        const question = input.value.trim();
-                        if (question) {
-                          askProjectAI(question);
-                          input.value = '';
-                        }
-                      }}
-                      disabled={loading}
-                      className="relative inline-flex items-center justify-center p-0.5 overflow-hidden text-sm font-medium rounded-lg group bg-gradient-to-r from-emerald-300 via-teal-200 to-orange-200 group-hover:from-emerald-300 group-hover:via-teal-200 group-hover:to-orange-200 focus:ring-4 focus:outline-none focus:ring-emerald-200 whitespace-nowrap min-w-[90px]"
-                    >
-                      <span className="relative w-full px-3 py-2.5 transition-all ease-in duration-75 bg-white rounded-md group-hover:bg-transparent text-gray-900 group-hover:text-gray-900">
-                        {loading ? (
-                          <>
-                            <span>Thinking</span>
-                            <LoadingSpinner />
-                          </>
-                        ) : (
-                          'Ask AI'
-                        )}
-                      </span>
-                    </button>
-                  </div>
-                </div>
-                <div className="flex-1 overflow-y-auto p-4">
-                  <div className="space-y-4">
-                    {[...projectAIHistory].reverse().map((message, index) => (
-                      <ChatMessage
-                        key={index}
-                        message={message}
-                        onRegenerate={message.role === 'assistant' ? () => askProjectAI(projectAIHistory[projectAIHistory.length - index - 2].content) : undefined}
-                      />
-                    ))}
-                  </div>
-                </div>
-              </>
-            )}
-          </div>
-        </div>
-      </div>
-    )
-  }
-
   // Update the project detail view
   const renderProjectDetail = () => {
     const activeProject = projects.find(p => p.id === activeProjectId)
     if (!activeProject) return null
+
+    // Prepare timeline items from sections with cleaned content and highlights
+    const timelineItems = (activeProject.sections || []).map(section => {
+      const cleanContent = stripHtml(section.content || '');
+      const highlights = sectionHighlights[section.id];
+      
+      return {
+        title: section.name,
+        cardTitle: section.name,
+        cardSubtitle: section.subtitle || '',
+        cardDetailedText: highlights || cleanContent.substring(0, 100) + (cleanContent.length > 100 ? '...' : ''),
+        id: section.id
+      };
+    });
+
+    // Force re-render of timeline items when highlights change
+    const timelineKey = JSON.stringify(timelineItems);
 
     return (
       <div className="h-screen flex flex-col">
@@ -707,57 +639,56 @@ export default function ProjectManager({ user }) {
               </button>
               <h1 className="text-2xl font-bold">{activeProject.name}</h1>
             </div>
+            <div className="flex items-center gap-4">
+              <Tooltip text="Ask AI about your entire project - it can see all sections and chapters">
+                <button
+                  onClick={() => setIsAIModalOpen(true)}
+                  className="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors duration-200 flex items-center gap-2"
+                >
+                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 10V3L4 14h7v7l9-11h-7z" />
+                  </svg>
+                  Project AI Assistant
+                </button>
+              </Tooltip>
+            </div>
           </div>
         </div>
 
         {/* Main Content */}
         <div className="flex-1 flex overflow-hidden">
-          {/* Sections Sidebar */}
-          <div className="w-64 border-r bg-gray-50 flex flex-col">
-            <div className="p-4 border-b bg-white">
-              <h2 className="text-lg font-semibold mb-2">Sections</h2>
-              <div className="space-y-2">
-                <input
-                  type="text"
-                  placeholder="New section name"
-                  value={sectionName}
-                  onChange={(e) => {
-                    setSectionName(e.target.value)
-                    if (validationErrors.sectionName) {
-                      setValidationErrors(prev => ({ ...prev, sectionName: '' }))
-                    }
-                  }}
-                  className={`border rounded p-2 w-full ${
-                    validationErrors.sectionName ? 'border-red-500 focus:ring-red-500' : 'focus:ring-blue-500'
-                  }`}
-                />
-                {validationErrors.sectionName && (
-                  <p className="text-red-500 text-sm">{validationErrors.sectionName}</p>
-                )}
-                <button
-                  onClick={handleAddSection}
-                  disabled={loadingStates.addSection}
-                  className="relative inline-flex items-center justify-center p-0.5 mb-2 me-2 overflow-hidden text-sm font-medium rounded-lg group bg-gradient-to-r from-emerald-300 via-teal-200 to-orange-200 group-hover:from-emerald-300 group-hover:via-teal-200 group-hover:to-orange-200 focus:ring-4 focus:outline-none focus:ring-emerald-200"
-                >
-                  <span className="relative px-5 py-2.5 transition-all ease-in duration-75 bg-white rounded-md group-hover:bg-transparent text-gray-900 group-hover:text-gray-900">
-                    {loadingStates.addSection ? (
-                      <>
-                        Adding... <LoadingSpinner />
-                      </>
-                    ) : (
-                      'Add Section'
-                    )}
-                  </span>
-                </button>
-              </div>
+          {/* Left Sidebar */}
+          <div className="w-64 bg-gray-50 border-r p-4 flex flex-col">
+            <div className="mb-4">
+              <input
+                type="text"
+                placeholder="New section name"
+                value={sectionName}
+                onChange={(e) => setSectionName(e.target.value)}
+                className="border rounded p-2 w-full mb-2"
+              />
+              <button
+                onClick={handleAddSection}
+                disabled={loadingStates.addSection}
+                className="relative inline-flex items-center justify-center p-0.5 mb-2 me-2 overflow-hidden text-sm font-medium rounded-lg group bg-gradient-to-r from-emerald-300 via-teal-200 to-orange-200 group-hover:from-emerald-300 group-hover:via-teal-200 group-hover:to-orange-200 focus:ring-4 focus:outline-none focus:ring-emerald-200"
+              >
+                <span className="relative px-5 py-2.5 transition-all ease-in duration-75 bg-white rounded-md group-hover:bg-transparent text-gray-900 group-hover:text-gray-900">
+                  {loadingStates.addSection ? (
+                    <>
+                      Adding... <LoadingSpinner />
+                    </>
+                  ) : (
+                    'Add Section'
+                  )}
+                </span>
+              </button>
             </div>
-            <div className="flex-1 overflow-y-auto p-2">
+            <div className="flex-1 overflow-y-auto">
               {activeProject.sections?.map((section) => (
                 <div
                   key={section.id}
                   onClick={() => {
                     setActiveSectionId(section.id)
-                    setEditorText(section.content || "")
                   }}
                   className={`p-3 rounded-lg mb-2 cursor-pointer transition-all duration-200 ${
                     section.id === activeSectionId
@@ -798,91 +729,185 @@ export default function ProjectManager({ user }) {
             </div>
           </div>
 
-          {/* Content Area */}
-          <div className="flex-1 overflow-y-auto p-6">
-            <div className="flex items-center justify-center h-full text-gray-500">
-              Select a section to start editing
+          {/* Center Content Area */}
+          <div className="flex-1 flex flex-col overflow-hidden">
+            {/* Timeline Section */}
+            <div className="flex-1 p-4 border-b min-h-[400px]">
+              <div className="flex justify-between items-center mb-4">
+                <h3 className="text-lg font-semibold">Chapter Timeline</h3>
+                <Tooltip text="Generate AI highlights for all chapters">
+                  <button
+                    onClick={generateAllHighlights}
+                    disabled={isGeneratingHighlights}
+                    className="relative inline-flex items-center justify-center p-0.5 overflow-hidden text-sm font-medium rounded-lg group bg-gradient-to-r from-emerald-300 via-teal-200 to-orange-200 group-hover:from-emerald-300 group-hover:via-teal-200 group-hover:to-orange-200 focus:ring-4 focus:outline-none focus:ring-emerald-200"
+                  >
+                    <span className="relative px-5 py-2.5 transition-all ease-in duration-75 bg-white rounded-md group-hover:bg-transparent text-gray-900 group-hover:text-gray-900">
+                      {isGeneratingHighlights ? (
+                        <>
+                          Generating... <LoadingSpinner />
+                        </>
+                      ) : (
+                        'Generate Highlights'
+                      )}
+                    </span>
+                  </button>
+                </Tooltip>
+              </div>
+              <div style={{ width: '100%', height: '100%' }}>
+                {timelineItems.length > 0 ? (
+                  <Chrono
+                    key={timelineKey}
+                    items={timelineItems}
+                    mode="horizontal"
+                    slideShow
+                    cardHeight={200}
+                    theme={{
+                      primary: '#000000',
+                      secondary: '#10b981',
+                      cardBgColor: '#ffffff',
+                      titleColor: '#222',
+                      cardTitleColor: '#10b981',
+                      cardSubtitleColor: '#666',
+                      cardDetailsColor: '#444',
+                      timelineContentColor: '#10b981',
+                    }}
+                    onItemSelected={item => {
+                      const section = (activeProject.sections || []).find(s => s.id === item.id)
+                      if (section) {
+                        setActiveSectionId(section.id);
+                        if (!sectionHighlights[section.id]) {
+                          generateSectionHighlights(section);
+                        }
+                      }
+                    }}
+                  />
+                ) : (
+                  <div className="text-center text-gray-500 h-full flex items-center justify-center">
+                    No sections yet. Add a section to see the timeline.
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Section Preview */}
+            <div className="p-4 border-t">
+              {activeSectionId ? (
+                <div className="text-center text-gray-500">
+                  Click on a section in the timeline or sidebar to edit it
+                </div>
+              ) : (
+                <div className="text-center text-gray-500">
+                  Select a section to edit or create a new one
+                </div>
+              )}
             </div>
           </div>
+        </div>
 
-          {/* AI Assistant Sidebar */}
-          <div className={`border-l bg-white flex flex-col transition-all duration-300 ${isAIChatMinimized ? 'w-10' : 'w-96'}`}>
-            <div className="p-2 border-b flex justify-between items-center">
-              {!isAIChatMinimized && (
-                <h2 className="text-lg font-semibold">Project AI Assistant</h2>
-              )}
+        {/* AI Assistant Modal */}
+        <Modal isOpen={isAIModalOpen} onClose={() => setIsAIModalOpen(false)}>
+          <div className="space-y-4">
+            <h2 className="text-xl font-semibold mb-4">Project AI Assistant</h2>
+            <div className="flex gap-2">
+              <input
+                type="text"
+                placeholder="Ask AI about this project..."
+                className="flex-1 border rounded-lg px-4 py-2"
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && !e.shiftKey) {
+                    e.preventDefault();
+                    const question = e.target.value.trim();
+                    if (question) {
+                      askProjectAI(question);
+                      e.target.value = '';
+                    }
+                  }
+                }}
+              />
               <button
-                onClick={() => setIsAIChatMinimized(!isAIChatMinimized)}
-                className="p-1 hover:bg-gray-100 rounded-full"
+                onClick={() => {
+                  const input = document.querySelector('input[placeholder="Ask AI about this project..."]');
+                  const question = input.value.trim();
+                  if (question) {
+                    askProjectAI(question);
+                    input.value = '';
+                  }
+                }}
+                disabled={loading}
+                className="relative inline-flex items-center justify-center p-0.5 overflow-hidden text-sm font-medium rounded-lg group bg-gradient-to-r from-emerald-300 via-teal-200 to-orange-200 group-hover:from-emerald-300 group-hover:via-teal-200 group-hover:to-orange-200 focus:ring-4 focus:outline-none focus:ring-emerald-200 whitespace-nowrap min-w-[90px]"
               >
-                {isAIChatMinimized ? (
-                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 5l7 7-7 7" />
-                  </svg>
-                ) : (
-                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 19l-7-7 7-7" />
-                  </svg>
-                )}
+                <span className="relative w-full px-3 py-2.5 transition-all ease-in duration-75 bg-white rounded-md group-hover:bg-transparent text-gray-900 group-hover:text-gray-900">
+                  {loading ? (
+                    <>
+                      <span>Thinking</span>
+                      <LoadingSpinner />
+                    </>
+                  ) : (
+                    'Ask AI'
+                  )}
+                </span>
               </button>
             </div>
-            {!isAIChatMinimized && (
-              <>
-                <div className="p-4 border-b">
-                  <div className="flex gap-2">
-                    <input
-                      type="text"
-                      placeholder="Ask AI about this project..."
-                      className="flex-1 border rounded-lg px-4 py-2"
-                      onKeyDown={(e) => {
-                        if (e.key === 'Enter' && !e.shiftKey) {
-                          e.preventDefault();
-                          const question = e.target.value.trim();
-                          if (question) {
-                            askProjectAI(question);
-                            e.target.value = '';
-                          }
-                        }
-                      }}
-                    />
-                    <button
-                      onClick={() => {
-                        const input = document.querySelector('input[placeholder="Ask AI about this project..."]');
-                        const question = input.value.trim();
-                        if (question) {
-                          askProjectAI(question);
-                          input.value = '';
-                        }
-                      }}
-                      disabled={loading}
-                      className="relative inline-flex items-center justify-center p-0.5 overflow-hidden text-sm font-medium rounded-lg group bg-gradient-to-r from-emerald-300 via-teal-200 to-orange-200 group-hover:from-emerald-300 group-hover:via-teal-200 group-hover:to-orange-200 focus:ring-4 focus:outline-none focus:ring-emerald-200 whitespace-nowrap min-w-[90px]"
-                    >
-                      <span className="relative w-full px-3 py-2.5 transition-all ease-in duration-75 bg-white rounded-md group-hover:bg-transparent text-gray-900 group-hover:text-gray-900">
-                        {loading ? (
-                          <>
-                            <span>Thinking</span>
-                            <LoadingSpinner />
-                          </>
-                        ) : (
-                          'Ask AI'
-                        )}
-                      </span>
-                    </button>
-                  </div>
-                </div>
-                <div className="flex-1 overflow-y-auto p-4">
-                  <div className="space-y-4">
-                    {[...projectAIHistory].reverse().map((message, index) => (
-                      <ChatMessage
-                        key={index}
-                        message={message}
-                        onRegenerate={message.role === 'assistant' ? () => askProjectAI(projectAIHistory[projectAIHistory.length - index - 2].content) : undefined}
-                      />
-                    ))}
-                  </div>
-                </div>
-              </>
-            )}
+            <div className="space-y-4 mt-4">
+              {projectAIHistory.map((message, index) => (
+                <ChatMessage
+                  key={index}
+                  message={message}
+                  onRegenerate={message.role === 'assistant' ? () => askProjectAI(projectAIHistory[index - 1].content) : undefined}
+                />
+              ))}
+            </div>
+          </div>
+        </Modal>
+      </div>
+    )
+  }
+
+  // Update the section detail view
+  const renderSectionDetail = () => {
+    const activeProject = projects.find(p => p.id === activeProjectId)
+    const activeSection = activeProject?.sections.find(s => s.id === activeSectionId)
+    
+    if (!activeSection) return null;
+
+    return (
+      <div className="h-screen flex flex-col">
+        {/* Section Header */}
+        <div className="bg-white border-b px-6 py-4">
+          <div className="flex items-center justify-between max-w-6xl mx-auto">
+            <div className="flex items-center gap-4">
+              <button
+                onClick={() => {
+                  setActiveSectionId(null)
+                }}
+                className="relative inline-flex items-center justify-center p-0.5 mb-2 me-2 overflow-hidden text-sm font-medium rounded-lg group bg-gradient-to-r from-emerald-300 via-teal-200 to-orange-200 group-hover:from-emerald-300 group-hover:via-teal-200 group-hover:to-orange-200 focus:ring-4 focus:outline-none focus:ring-emerald-200"
+              >
+                <span className="relative px-5 py-2.5 transition-all ease-in duration-75 bg-white rounded-md group-hover:bg-transparent text-gray-900 group-hover:text-gray-900">
+                  ← Back to Project
+                </span>
+              </button>
+              <h1 className="text-2xl font-bold">{activeSection.name}</h1>
+            </div>
+          </div>
+        </div>
+
+        {/* Main Content */}
+        <div className="flex-1 flex overflow-hidden">
+          {/* Content Area */}
+          <div className="flex-1 overflow-y-auto p-6">
+            <div className="max-w-3xl mx-auto space-y-4">
+              <div className="flex items-center justify-end">
+                {saveConfirmation && (
+                  <span className="text-green-600 font-medium">Changes saved!</span>
+                )}
+              </div>
+              {/* Use EditorPane with TipTap */}
+              <EditorPane
+                activeSection={activeSection}
+                onSaveContent={handleSaveContent}
+                onExport={exportSection}
+              />
+            </div>
           </div>
         </div>
       </div>

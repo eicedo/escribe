@@ -32,7 +32,12 @@ export default function ProjectManager({ user }) {
     let mounted = true
 
     const fetchProjects = async () => {
-      if (!user?.id) return
+      if (!user?.id) {
+        console.log('[ProjectManager] No user ID, clearing projects')
+        setProjects([])  // Clear projects when user is null
+        setIsLoading(false)
+        return
+      }
       
       setIsLoading(true)
       setError(null)

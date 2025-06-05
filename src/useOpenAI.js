@@ -45,7 +45,7 @@ export function useOpenAI() {
 
       console.log('Sending request to OpenAI:', { text, messages });
       const completion = await openai.chat.completions.create({
-        model: 'gpt-3.5-turbo',
+        model: 'gpt-4o',
         messages: [...messages, { role: 'user', content: regenerate ? lastPrompt : text }],
         temperature: 0.7,
         max_tokens: 500,
