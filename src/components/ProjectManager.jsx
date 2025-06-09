@@ -544,9 +544,21 @@ export default function ProjectManager({ user }) {
                             ) : (
                               <div className="flex items-center justify-between">
                                 <h4 className="text-xl font-semibold">{p.name}</h4>
-                                <span className="text-sm text-gray-500">
-                                  {p.sections?.length || 0} sections
-                                </span>
+                                <div className="flex items-center gap-2">
+                                  <span className="text-sm text-gray-500">
+                                    {p.sections?.length || 0} sections
+                                  </span>
+                                  <Tooltip text="Rename project">
+                                    <button
+                                      onClick={() => setEditingProjectName(p.id)}
+                                      className="text-gray-500 hover:text-gray-700 p-1 rounded-full hover:bg-gray-100 transition-colors duration-200"
+                                    >
+                                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
+                                      </svg>
+                                    </button>
+                                  </Tooltip>
+                                </div>
                               </div>
                             )}
                           </div>
@@ -564,16 +576,6 @@ export default function ProjectManager({ user }) {
                             </span>
                           </button>
                           <div className="flex gap-2">
-                            <Tooltip text="Rename this project">
-                              <button
-                                onClick={() => setEditingProjectName(p.id)}
-                                className="relative inline-flex items-center justify-center p-0.5 mb-2 me-2 overflow-hidden text-sm font-medium rounded-lg group bg-gradient-to-r from-emerald-300 via-teal-200 to-orange-200 group-hover:from-emerald-300 group-hover:via-teal-200 group-hover:to-orange-200 focus:ring-4 focus:outline-none focus:ring-emerald-200"
-                              >
-                                <span className="relative px-5 py-2.5 transition-all ease-in duration-75 bg-white rounded-md group-hover:bg-transparent text-gray-900 group-hover:text-gray-900">
-                                  Edit
-                                </span>
-                              </button>
-                            </Tooltip>
                             <Tooltip text="Delete this project and all its sections">
                               <button
                                 onClick={() => handleDeleteProject(p.id)}
@@ -688,7 +690,9 @@ export default function ProjectManager({ user }) {
                 <div
                   key={section.id}
                   onClick={() => {
-                    setActiveSectionId(section.id)
+                    if (editingSectionName !== section.id) {
+                      setActiveSectionId(section.id)
+                    }
                   }}
                   className={`p-3 rounded-lg mb-2 cursor-pointer transition-all duration-200 ${
                     section.id === activeSectionId
@@ -697,32 +701,77 @@ export default function ProjectManager({ user }) {
                   }`}
                 >
                   <div className="flex items-center justify-between">
-                    <span className="font-medium">{section.name}</span>
-                    <div className="flex gap-1">
-                      <Tooltip text="Delete section">
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation()
-                            const confirmDelete = window.confirm("Delete this section?")
-                            if (confirmDelete) {
-                              setProjects(projects.map(p =>
-                                p.id === activeProjectId
-                                  ? {
-                                      ...p,
-                                      sections: p.sections.filter(s => s.id !== section.id)
-                                    }
-                                  : p
-                              ))
-                            }
-                          }}
-                          className="relative inline-flex items-center justify-center p-0.5 overflow-hidden text-[10px] font-medium rounded group bg-gradient-to-r from-emerald-300 via-teal-200 to-orange-200 group-hover:from-emerald-300 group-hover:via-teal-200 group-hover:to-orange-200 focus:ring-2 focus:outline-none focus:ring-emerald-200"
-                        >
-                          <span className="relative px-2 py-1 transition-all ease-in duration-75 bg-white rounded group-hover:bg-transparent text-gray-900 group-hover:text-gray-900">
-                            Delete
-                          </span>
-                        </button>
-                      </Tooltip>
-                    </div>
+                    {editingSectionName === section.id ? (
+                      <input
+                        type="text"
+                        value={section.name}
+                        onChange={(e) => {
+                          setProjects(projects.map(p =>
+                            p.id === activeProjectId
+                              ? {
+                                  ...p,
+                                  sections: p.sections.map(s =>
+                                    s.id === section.id ? { ...s, name: e.target.value } : s
+                                  )
+                                }
+                              : p
+                          ))
+                        }}
+                        onBlur={() => {
+                          setEditingSectionName(null)
+                        }}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') {
+                            setEditingSectionName(null)
+                          }
+                        }}
+                        className="border rounded p-1 w-full"
+                        autoFocus
+                        onClick={(e) => e.stopPropagation()}
+                      />
+                    ) : (
+                      <>
+                        <span className="font-medium">{section.name}</span>
+                        <div className="flex gap-1">
+                          <Tooltip text="Rename section">
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation()
+                                setEditingSectionName(section.id)
+                              }}
+                              className="text-gray-500 hover:text-gray-700 p-1 rounded-full hover:bg-gray-100 transition-colors duration-200"
+                            >
+                              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
+                              </svg>
+                            </button>
+                          </Tooltip>
+                          <Tooltip text="Delete section">
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation()
+                                const confirmDelete = window.confirm("Delete this section?")
+                                if (confirmDelete) {
+                                  setProjects(projects.map(p =>
+                                    p.id === activeProjectId
+                                      ? {
+                                          ...p,
+                                          sections: p.sections.filter(s => s.id !== section.id)
+                                        }
+                                      : p
+                                  ))
+                                }
+                              }}
+                              className="text-gray-500 hover:text-gray-700 p-1 rounded-full hover:bg-gray-100 transition-colors duration-200"
+                            >
+                              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                              </svg>
+                            </button>
+                          </Tooltip>
+                        </div>
+                      </>
+                    )}
                   </div>
                 </div>
               ))}

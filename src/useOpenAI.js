@@ -1,20 +1,14 @@
 import { useState, useCallback } from 'react';
-import { OpenAI } from 'openai';
 
 // Maximum number of messages to keep in history
 const MAX_HISTORY = 6;
-
-// Initialize OpenAI client with API key from environment variable
-const openai = new OpenAI({
-  apiKey: import.meta.env.VITE_OPENAI_API_KEY,
-  dangerouslyAllowBrowser: true, // Note: this should be backend-only in prod!
-});
 
 export function useOpenAI() {
   const [history, setHistory] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [lastPrompt, setLastPrompt] = useState('');
+  const [response, setResponse] = useState(null);
 
   // Helper to update history with new messages
   const updateHistory = useCallback((newMessage) => {
@@ -29,6 +23,7 @@ export function useOpenAI() {
     const { regenerate = false, displayMessage } = options;
     setLoading(true);
     setError(null);
+    setResponse(null);
     
     try {
       // If not regenerating, save the new prompt
@@ -43,23 +38,29 @@ export function useOpenAI() {
         ? history.slice(0, -1) // Remove last response for regeneration
         : history;
 
-      console.log('Sending request to OpenAI:', { text, messages });
-      const completion = await openai.chat.completions.create({
-        model: 'gpt-4o',
-        messages: [...messages, { role: 'user', content: regenerate ? lastPrompt : text }],
-        temperature: 0.7,
-        max_tokens: 500,
-      });
-      console.log('OpenAI response:', completion);
+      const apiMessages = [...messages, { role: 'user', content: regenerate ? lastPrompt : text }];
 
-      const response = completion.choices[0].message;
-      updateHistory({ role: 'assistant', content: response.content });
-      
-      return response.content;
+      const res = await fetch('/api/ai', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ messages: apiMessages }),
+      });
+
+      if (!res.ok) {
+        const errData = await res.json();
+        throw new Error(errData.error || 'Error reaching AI backend');
+      }
+
+      const data = await res.json();
+      const aiMessage = data.response;
+      updateHistory({ role: 'assistant', content: aiMessage.content });
+      setResponse(aiMessage.content);
+      return aiMessage.content;
     } catch (err) {
-      console.error('OpenAI API error:', err);
-      const errorMessage = err.message || 'Error reaching OpenAI';
+      console.error('AI backend error:', err);
+      const errorMessage = err.message || 'Error reaching AI backend';
       setError(errorMessage);
+      setResponse(`⚠️ ${errorMessage}`);
       return `⚠️ ${errorMessage}`;
     } finally {
       setLoading(false);
@@ -79,6 +80,7 @@ export function useOpenAI() {
     setHistory([]);
     setLastPrompt('');
     setError(null);
+    setResponse(null);
   }, []);
 
   return { 
@@ -88,6 +90,7 @@ export function useOpenAI() {
     history,
     loading,
     error,
-    lastPrompt 
+    lastPrompt,
+    response
   };
 }
