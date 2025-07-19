@@ -103,19 +103,23 @@ const stripHtml = (html) => {
   return tmp.textContent || tmp.innerText || '';
 };
 
+// Add mode state to AIAssistantSidebar
 function AIAssistantSidebar({
-  contextType, // 'project' or 'section'
-  contextName,
-  contextContent,
   ask,
   loading,
   history,
   setHistory,
-  onApplySuggestion
+  editorPaneRef
 }) {
   const [input, setInput] = useState('');
-  const [collapsed, setCollapsed] = useState(false);
+  const [mode, setMode] = useState('assistant'); // 'assistant' or 'revise'
+  const [reviseSuggestion, setReviseSuggestion] = useState(null);
+  const [revisePending, setRevisePending] = useState(false);
   const chatEndRef = useRef(null);
+  const [selectionWarning, setSelectionWarning] = useState('');
+  const [lastSelectionRange, setLastSelectionRange] = useState(null);
+  const [lastSelectionContent, setLastSelectionContent] = useState('');
+  const [showUndo, setShowUndo] = useState(false);
 
   useEffect(() => {
     if (chatEndRef.current) {
@@ -123,99 +127,128 @@ function AIAssistantSidebar({
     }
   }, [history]);
 
-  if (collapsed) {
-    return (
-      <div className="fixed right-0 top-24 z-40">
-        <button
-          onClick={() => setCollapsed(false)}
-          className="bg-white border-l border-t border-b rounded-l-lg shadow p-2 hover:bg-gray-100"
-          title="Show AI Assistant"
-        >
-          <svg className="w-6 h-6 text-gray-700" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 5l7 7-7 7" />
-          </svg>
-        </button>
-      </div>
-    );
-  }
+  // In handleAsk, revert Revise mode logic to just call ask and setHistory as before, without extra state for selection/undo.
+  const handleAsk = async () => {
+    setSelectionWarning('');
+    if (mode === 'revise') {
+      const selectedText = editorPaneRef.current?.getSelectedText?.();
+      if (!selectedText || !selectedText.trim()) {
+        setSelectionWarning('Please highlight text in the editor to revise.');
+        return;
+      }
+      setRevisePending(true);
+      const prompt = `Revise ONLY the selected text below. Do not return the whole section.\nSelected text:\n${selectedText}\n\nUser’s instruction: ${input}`;
+      let response = '';
+      try {
+        response = await ask(prompt);
+        setHistory(prev => [
+          ...prev,
+          { role: 'user', content: input }, // Only the user's instruction
+          { role: 'assistant', content: response, originalPrompt: input }
+        ]);
+        setReviseSuggestion(response);
+      } catch (error) {
+        setHistory(prev => [
+          ...prev,
+          { role: 'user', content: input },
+          { role: 'assistant', content: '⚠️ Error: Could not get response from AI', originalPrompt: input }
+        ]);
+        setReviseSuggestion(null);
+      } finally {
+        setRevisePending(false);
+        setInput('');
+      }
+      return;
+    }
+    // Assistant mode
+    setReviseSuggestion(null);
+    setShowUndo(false);
+    await ask(input);
+    setInput('');
+  };
 
   return (
     <div className="w-96 max-w-full flex flex-col bg-white/90 border-l h-full overflow-hidden relative">
       <div className="flex items-center justify-between p-4 border-b">
         <h3 className="text-lg font-semibold">AI Assistant</h3>
-        <button
-          onClick={() => setCollapsed(true)}
-          className="ml-2 text-gray-500 hover:text-gray-700 bg-white border rounded-full shadow p-2"
-          title="Hide AI Assistant"
-        >
-          <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 19l-7-7 7-7" />
-          </svg>
-        </button>
       </div>
       <div className="p-4 border-b">
         <label className="block text-sm font-medium mb-1">Guided Mode</label>
         <select
           className="w-full border rounded px-2 py-1 mb-2"
-          value="assistant"
+          value={mode}
           onChange={e => {
-            // This is a placeholder, as the mode selector is removed
+            setMode(e.target.value);
+            setReviseSuggestion(null);
+            setSelectionWarning('');
           }}
         >
           <option value="assistant">Assistant</option>
+          <option value="revise">Revise</option>
         </select>
+        {mode === 'revise' && selectionWarning && (
+          <div className="text-red-500 text-sm mb-2">{selectionWarning}</div>
+        )}
       </div>
       <div className="flex-1 overflow-y-auto p-4">
-        <div className="space-y-4">
-          {history.map((message, index) => (
-            <ChatMessage
-              key={index}
-              message={message}
-              onRegenerate={message.role === 'assistant' ? () => ask(message.originalPrompt, { displayMessage: message.originalPrompt }) : undefined}
-              onApply={onApplySuggestion}
-            />
-          ))}
-          <div ref={chatEndRef} />
-        </div>
+        {history.map((message, index) => (
+          <ChatMessage key={index} message={message} />
+        ))}
+        <div ref={chatEndRef} />
       </div>
       <div className="p-4 border-t">
         <div className="flex gap-2">
           <input
             type="text"
-            placeholder={`Ask AI about this ${contextType}...`}
+            placeholder={mode === 'revise' ? 'Instruction for revision...' : 'Ask AI...'}
             className="flex-1 border rounded-lg px-4 py-2"
             value={input}
             onChange={e => setInput(e.target.value)}
             onKeyDown={e => {
               if (e.key === 'Enter' && !e.shiftKey) {
                 e.preventDefault();
-                if (input.trim()) {
-                  ask(input, { displayMessage: input });
-                  setInput('');
+                if (input.trim() && (!revisePending && !loading)) {
+                  handleAsk();
                 }
               }
             }}
+            disabled={revisePending || loading}
           />
           <button
-            onClick={() => {
-              if (input.trim()) {
-                ask(input, { displayMessage: input });
-                setInput('');
-              }
-            }}
-            disabled={loading}
-            className={`px-4 py-2 bg-purple-600 text-white rounded hover:bg-purple-700 flex items-center space-x-2 ${loading ? 'opacity-75 cursor-not-allowed' : ''}`}
+            onClick={handleAsk}
+            disabled={revisePending || loading || (mode === 'revise' && (!editorPaneRef.current?.getSelectedText?.() || !editorPaneRef.current.getSelectedText().trim()))}
+            className={`px-4 py-2 bg-purple-600 text-white rounded hover:bg-purple-700 ${loading || revisePending ? 'opacity-75 cursor-not-allowed' : ''}`}
           >
-            {loading ? (
-              <>
-                <span>Thinking</span>
-                <LoadingSpinner />
-              </>
-            ) : (
-              'Ask AI'
-            )}
+            {loading || revisePending ? 'Thinking...' : 'Ask AI'}
           </button>
         </div>
+        {mode === 'revise' && reviseSuggestion && (
+          <button
+            onClick={() => {
+              if (editorPaneRef.current?.restoreSelectionAndReplace && lastSelectionRange) {
+                editorPaneRef.current.restoreSelectionAndReplace(lastSelectionRange, reviseSuggestion);
+                setShowUndo(true);
+              }
+            }}
+            className="mt-2 px-4 py-2 bg-green-600 text-white rounded hover:bg-green-700 transition-colors duration-200"
+          >
+            Apply AI Suggestion
+          </button>
+        )}
+        {mode === 'revise' && showUndo && (
+          <button
+            onClick={() => {
+              if (editorPaneRef.current?.restoreSelectionAndReplace && lastSelectionRange) {
+                editorPaneRef.current.restoreSelectionAndReplace(lastSelectionRange, lastSelectionContent);
+                setShowUndo(false);
+                setReviseSuggestion(null);
+              }
+            }}
+            className="mt-2 px-4 py-2 bg-yellow-500 text-white rounded hover:bg-yellow-600 transition-colors duration-200"
+          >
+            Undo AI Suggestion
+          </button>
+        )}
       </div>
     </div>
   );
@@ -249,31 +282,33 @@ export default function ProjectManager({ user }) {
   const [isAIChatMinimized, setIsAIChatMinimized] = useState(false)
   const [sectionHighlights, setSectionHighlights] = useState({});
   const [isGeneratingHighlights, setIsGeneratingHighlights] = useState(false);
+  // Add these states at the top level of ProjectManager
+  const [lastSectionContent, setLastSectionContent] = useState(null);
+  const [showUndo, setShowUndo] = useState(false);
+  // Add a state to track if the last AI response was for a selection
+  const [lastWasSelection, setLastWasSelection] = useState(false);
+  const [lastAISuggestion, setLastAISuggestion] = useState(null);
 
-  const { ask, response, loading, history, regenerate } = useOpenAI()
+  const { ask, response: openAIResponse, loading, history, regenerate } = useOpenAI()
 
   const [sectionAIHistory, setSectionAIHistory] = useState([]);
   const editorPaneRef = useRef();
 
-  const askSectionAI = async (question, { displayMessage } = {}) => {
+  // In askSectionAI, only send the user's question and section content to the API. Do not include any system prompt or instructions to always revise.
+  const askSectionAI = async (question) => {
     const editorContent = editorPaneRef.current?.getContent?.() || '';
-    // Build the new prompt for the section AI assistant
-    const prompt = `You are an expert writing assistant. The user is working on the following chapter/section of a larger project. Focus your suggestions, edits, and ideas on this section only. Here is the content:\n${editorContent}\n\nUser’s question: ${displayMessage || question}`;
+    const prompt = `Section content:\n${editorContent}\n\nUser’s question: ${question}`;
     try {
-      const response = await ask(prompt, { displayMessage, sectionContent: editorContent, mode: 'assistant' });
+      const response = await ask(prompt);
       setSectionAIHistory(prev => [
         ...prev,
-        { role: 'user', content: displayMessage || question },
+        { role: 'user', content: question },
         { role: 'assistant', content: response, originalPrompt: question }
       ]);
-      // Removed automatic content update to editor
-      // if (typeof response === 'object' && response.newContent) {
-      //   editorPaneRef.current?.setContent?.(response.newContent);
-      // }
     } catch (error) {
       setSectionAIHistory(prev => [
         ...prev,
-        { role: 'user', content: displayMessage || question },
+        { role: 'user', content: question },
         { role: 'assistant', content: '⚠️ Error: Could not get response from AI', originalPrompt: question }
       ]);
     }
@@ -303,7 +338,6 @@ export default function ProjectManager({ user }) {
   }, [isAIChatMinimized]);
 
   useEffect(() => {
-    console.log('[ProjectManager] useEffect triggered with user:', user?.id)
     let mounted = true
 
     const fetchProjects = async () => {
@@ -1001,8 +1035,19 @@ export default function ProjectManager({ user }) {
 
     // Handler to apply AI suggestion to the editor
     const handleApplyAISuggestion = (newContent) => {
+      // Save current content before applying suggestion
+      const currentContent = editorPaneRef.current?.getContent?.();
+      setLastSectionContent(currentContent);
+      setShowUndo(true);
       if (editorPaneRef.current?.setContent) {
         editorPaneRef.current.setContent(newContent);
+      }
+    };
+
+    const handleUndoApplyAISuggestion = () => {
+      if (lastSectionContent && editorPaneRef.current?.setContent) {
+        editorPaneRef.current.setContent(lastSectionContent);
+        setShowUndo(false);
       }
     };
 
@@ -1044,6 +1089,14 @@ export default function ProjectManager({ user }) {
                 onSaveContent={handleSaveContent}
                 onExport={exportSection}
               />
+              {showUndo && (
+                <button
+                  onClick={handleUndoApplyAISuggestion}
+                  className="mt-2 px-4 py-2 bg-yellow-500 text-white rounded hover:bg-yellow-600 transition-colors duration-200"
+                >
+                  Undo Apply AI Suggestion
+                </button>
+              )}
             </div>
           </div>
           {/* AI Assistant Sidebar */}
@@ -1056,6 +1109,7 @@ export default function ProjectManager({ user }) {
             history={sectionAIHistory}
             setHistory={setSectionAIHistory}
             onApplySuggestion={handleApplyAISuggestion}
+            editorPaneRef={editorPaneRef}
           />
         </div>
       </div>

@@ -405,6 +405,25 @@ export const EditorPane = forwardRef(({ activeSection, onSaveContent, onExport }
     getContent: () => editor?.getHTML() || '',
     setContent: (newContent) => {
       if (editor) editor.commands.setContent(newContent)
+    },
+    getSelectedText: () => {
+      if (!editor) return '';
+      const { from, to } = editor.state.selection;
+      return editor.state.doc.textBetween(from, to, ' ');
+    },
+    getSelectionRange: () => {
+      if (!editor) return null;
+      const { from, to } = editor.state.selection;
+      return { from, to };
+    },
+    getSelectionContent: (range) => {
+      if (!editor || !range) return '';
+      return editor.state.doc.textBetween(range.from, range.to, ' ');
+    },
+    restoreSelectionAndReplace: (range, newText) => {
+      if (!editor || !range) return;
+      editor.commands.setTextSelection(range);
+      editor.commands.insertContent(newText);
     }
   }), [editor]);
 
