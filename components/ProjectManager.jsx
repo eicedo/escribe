@@ -16,6 +16,14 @@ export default function ProjectManager({ user }) {
   const [loadingStates, setLoadingStates] = useState({})
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState(null)
+  const [aiMode, setAiMode] = useState('rewrite')
+  const aiModes = [
+    { value: 'brainstorm', label: 'Brainstorm' },
+    { value: 'outline', label: 'Outline' },
+    { value: 'rewrite', label: 'Rewrite' },
+    { value: 'summarize', label: 'Summarize' },
+    { value: 'fix', label: 'Fix grammar' },
+  ]
 
   const { ask, response, loading } = useOpenAI()
 
@@ -253,7 +261,7 @@ export default function ProjectManager({ user }) {
       </div>
 
       {/* Main Content */}
-      <div className="flex-1 p-6 overflow-y-auto">
+      <div className="flex-1 p-6 overflow-y-auto min-h-[600px]">
         {!activeSection && (
           <>
             <div className="mb-6">
@@ -378,7 +386,7 @@ export default function ProjectManager({ user }) {
               ← Back to Projects
             </button>
 
-            <div className="space-y-4">
+            <div className="space-y-4 mb-16">
               <h3 className="text-lg font-medium">Editing: {activeSection.name}</h3>
               <textarea
                 className="w-full h-40 border rounded p-2"
@@ -386,6 +394,19 @@ export default function ProjectManager({ user }) {
                 value={editorText}
                 onChange={(e) => setEditorText(e.target.value)}
               />
+              <div className="mb-2">
+                <label htmlFor="ai-mode" className="mr-2 font-medium">AI Mode:</label>
+                <select
+                  id="ai-mode"
+                  value={aiMode}
+                  onChange={e => setAiMode(e.target.value)}
+                  className="border rounded p-1"
+                >
+                  {aiModes.map(mode => (
+                    <option key={mode.value} value={mode.value}>{mode.label}</option>
+                  ))}
+                </select>
+              </div>
               <div className="space-x-2">
                 <button
                   onClick={handleSaveContent}
@@ -394,7 +415,7 @@ export default function ProjectManager({ user }) {
                   Save Section
                 </button>
                 <button
-                  onClick={() => ask(editorText)}
+                  onClick={() => ask(editorText, { mode: aiMode })}
                   className="px-4 py-2 bg-purple-600 text-white rounded hover:bg-purple-700"
                 >
                   Ask AI for Help
@@ -416,9 +437,7 @@ export default function ProjectManager({ user }) {
                   Export as .md
                 </button>
               </div>
-
               {loading && <p className="text-gray-500">Thinking...</p>}
-
               {response && (
                 <div className="p-4 mt-4 border rounded bg-gray-50">
                   <h4 className="font-medium mb-2">AI Suggestion:</h4>

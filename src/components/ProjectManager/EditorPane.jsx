@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from 'react'
+import { useState, useRef, useEffect, forwardRef, useImperativeHandle } from 'react'
 import { ChatMessage } from './shared/ChatMessage'
 import { LoadingSpinner } from './shared/LoadingSpinner'
 import { useOpenAI } from '../../useOpenAI'
@@ -254,15 +254,10 @@ const MenuBar = ({ editor }) => {
   )
 }
 
-export const EditorPane = ({
-  activeSection,
-  onSaveContent,
-  onExport
-}) => {
+export const EditorPane = forwardRef(({ activeSection, onSaveContent, onExport }, ref) => {
   const [editorText, setEditorText] = useState(activeSection?.content || "")
   const { ask, history, loading, regenerate } = useOpenAI()
   const chatEndRef = useRef(null)
-  const [isChatMinimized, setIsChatMinimized] = useState(false)
   const [showCommentModal, setShowCommentModal] = useState(false)
   const [pendingComment, setPendingComment] = useState('')
   const [commentSelection, setCommentSelection] = useState(null)
@@ -406,6 +401,13 @@ export const EditorPane = ({
     };
   }, [editor]);
 
+  useImperativeHandle(ref, () => ({
+    getContent: () => editor?.getHTML() || '',
+    setContent: (newContent) => {
+      if (editor) editor.commands.setContent(newContent)
+    }
+  }), [editor]);
+
   if (!activeSection) {
     return (
       <div className="flex items-center justify-center h-full text-gray-500">
@@ -416,33 +418,8 @@ export const EditorPane = ({
 
   return (
     <div className="flex flex-row h-full w-full overflow-hidden relative">
-      {/* Toggle Button - always visible */}
-      {isChatMinimized ? (
-        <button
-          onClick={() => setIsChatMinimized(false)}
-          className="fixed z-30 top-24 right-8 bg-gradient-to-r from-orange-300 via-emerald-300 to-teal-200 border-2 border-white shadow-lg rounded-full p-2.5 hover:scale-105 transition-transform duration-150"
-          title="Show AI Assistant"
-        >
-          <svg className="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 5l7 7-7 7" />
-          </svg>
-        </button>
-      ) : (
-        <div className="absolute top-4 right-4 z-20">
-          <button
-            onClick={() => setIsChatMinimized(true)}
-            className="text-gray-500 hover:text-gray-700 bg-white border rounded-full shadow p-2"
-            title="Hide AI Assistant"
-          >
-            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 19l-7-7 7-7" />
-            </svg>
-          </button>
-        </div>
-      )}
-
       {/* Content Editor */}
-      <div className={`flex flex-col transition-all duration-300 ${isChatMinimized ? 'w-full' : 'w-2/3'} p-6`}> 
+      <div className="flex flex-col flex-1 transition-all duration-300 p-6"> 
         <div className="flex items-center justify-between mb-4">
           <h2 className="text-xl font-semibold">
             Editing: {activeSection.name}
@@ -488,69 +465,6 @@ export const EditorPane = ({
         </div>
       </div>
 
-      {/* AI Assistant */}
-      <div className={`relative flex flex-col bg-white/80 border-l transition-all duration-300 ${isChatMinimized ? 'hidden' : 'w-1/3'} h-full overflow-hidden`}>
-        <div className="flex items-center justify-between p-4 border-b">
-          <h3 className="text-lg font-semibold">AI Assistant</h3>
-        </div>
-        <div className="flex-1 overflow-y-auto p-4">
-          <div className="space-y-4">
-            {history.map((message, index) => (
-              <ChatMessage
-                key={index}
-                message={message}
-                onRegenerate={message.role === 'assistant' ? regenerate : undefined}
-              />
-            ))}
-            <div ref={chatEndRef} />
-          </div>
-        </div>
-        <div className="p-4 border-t">
-          <div className="flex gap-2">
-            <input
-              type="text"
-              placeholder="Ask AI about your content..."
-              className="flex-1 border rounded-lg px-4 py-2"
-              onKeyDown={(e) => {
-                if (e.key === 'Enter' && !e.shiftKey) {
-                  e.preventDefault();
-                  const userQuestion = e.target.value;
-                  ask(`Regarding this content:\n\n${editorText}\n\nQuestion: ${userQuestion}`, {
-                    displayMessage: userQuestion
-                  });
-                  e.target.value = '';
-                }
-              }}
-            />
-            <Tooltip text="Ask AI about this section's content">
-              <button
-                onClick={() => {
-                  const input = document.querySelector('input[placeholder="Ask AI about your content..."]');
-                  const userQuestion = input.value.trim();
-                  if (userQuestion) {
-                    ask(`Regarding this content:\n\n${editorText}\n\nQuestion: ${userQuestion}`, {
-                      displayMessage: userQuestion
-                    });
-                    input.value = '';
-                  }
-                }}
-                disabled={loading}
-                className={`px-4 py-2 bg-purple-600 text-white rounded hover:bg-purple-700 flex items-center space-x-2 ${loading ? 'opacity-75 cursor-not-allowed' : ''}`}
-              >
-                {loading ? (
-                  <>
-                    <span>Thinking</span>
-                    <LoadingSpinner />
-                  </>
-                ) : (
-                  'Ask AI'
-                )}
-              </button>
-            </Tooltip>
-          </div>
-        </div>
-      </div>
-
       {/* Comment Modal */}
       {false && showCommentModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-30">
@@ -587,4 +501,4 @@ export const EditorPane = ({
       )}
     </div>
   )
-} 
+}) 

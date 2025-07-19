@@ -20,17 +20,28 @@ export function useOpenAI() {
   }, []);
 
   const ask = async (text, options = {}) => {
-    const { regenerate = false, displayMessage } = options;
+    const { regenerate = false, displayMessage, mode = 'rewrite', sectionContent } = options;
     setLoading(true);
     setError(null);
     setResponse(null);
     
+    // Mode instructions
+    const modeInstructions = {
+      brainstorm: 'Brainstorm ideas for the following text:',
+      outline: 'Create an outline for the following text:',
+      rewrite: 'Rewrite the following text to improve clarity and style:',
+      summarize: 'Summarize the following text:',
+      fix: 'Correct the grammar and spelling in the following text:',
+    };
+    const instruction = modeInstructions[mode] || modeInstructions['rewrite'];
+    const promptWithMode = `${instruction}\n\n${text}`;
+
     try {
       // If not regenerating, save the new prompt
       if (!regenerate) {
         setLastPrompt(text);
         // Use displayMessage if provided, otherwise use the full text
-        updateHistory({ role: 'user', content: displayMessage || text });
+        updateHistory({ role: 'user', content: displayMessage || promptWithMode });
       }
 
       // Prepare messages for API call
@@ -38,12 +49,12 @@ export function useOpenAI() {
         ? history.slice(0, -1) // Remove last response for regeneration
         : history;
 
-      const apiMessages = [...messages, { role: 'user', content: regenerate ? lastPrompt : text }];
+      const apiMessages = [...messages, { role: 'user', content: regenerate ? lastPrompt : promptWithMode }];
 
       const res = await fetch('/api/ai', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ messages: apiMessages }),
+        body: JSON.stringify({ messages: apiMessages, sectionContent }),
       });
 
       if (!res.ok) {
@@ -53,6 +64,16 @@ export function useOpenAI() {
 
       const data = await res.json();
       const aiMessage = data.response;
+      // Try to parse as JSON for newContent
+      let parsed;
+      try {
+        parsed = JSON.parse(aiMessage.content);
+        if (parsed && parsed.newContent) {
+          updateHistory({ role: 'assistant', content: parsed.newContent });
+          setResponse(parsed);
+          return parsed;
+        }
+      } catch (e) {}
       updateHistory({ role: 'assistant', content: aiMessage.content });
       setResponse(aiMessage.content);
       return aiMessage.content;
